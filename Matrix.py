@@ -81,7 +81,9 @@ class Matrix:
 
     def randomize(self):
         self.data = [
-            [random.random() for i in range(self.cols)] for j in range(self.rows)
+            # getting random values between 0 and 1
+            [((random.random() * 2) - 1) for i in range(self.cols)]
+            for j in range(self.rows)
         ]
 
     def subtract(a, b):
