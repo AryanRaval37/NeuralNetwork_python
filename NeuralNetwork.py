@@ -1,4 +1,5 @@
 from Matrix import Matrix as matrix
+import math
 
 
 class NeuralNetwork:
@@ -28,6 +29,51 @@ class NeuralNetwork:
                 }
             )
         )
+        self.learning_rate = 0.1
+
+    def sigmoid(self, x):
+        return 1 / (1 + math.exp(-x))
+
+    def __dsigmoid(y):
+        return y * (1 - y)
+
+    def __predictLayer(self, index_l2, results_l1):
+        inputs = results_l1
+        hidden = matrix.multiply(self.layers[index_l2].weights, inputs)
+        hidden.add(self.layers[index_l2].bias)
+        outputs = matrix.map(hidden, self.sigmoid)
+        return outputs
+
+    def predict(self, input_array):
+        # predict function works. However it is giving numbers very close to one when the number
+        # of layers are increased. Guessed Reaseon. There are no negative numbers here.
+        # every layer, the bias gets added (which is random)
+        # multiplication hardly recuded the numbers as compared the addition of the bias.
+        # is this supposed to happen??
+        # will this give an accurate result when trained???
+        assert isinstance(
+            input_array, list
+        ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
+        assert (
+            len(input_array) == self.inputNodes
+        ), "\n\nThe number of inputs provided to predict are not matching\nto the number of inputNodes mentioned before."
+        assert (
+            self.compiled
+        ), "\n\nThe model is not compiled yet.\n Compile the model to predict outputs.\n"
+        self.layers[0].inputList = input_array
+        self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
+        print(self.layers[0].inputMatrix)
+        i = 2
+        previousPrediction = self.__predictLayer(1, self.layers[0].inputMatrix)
+        print(previousPrediction)
+        while i <= len(self.layers) - 1:
+            print(i)
+            print(previousPrediction)
+            previousPrediction = self.__predictLayer(i, previousPrediction)
+            i += 1
+        print(previousPrediction)
+        prediction = previousPrediction.toList()
+        return prediction
 
     def __connect(self, index_l1, index_l2):
         nodes_l1 = self.layers[index_l1].nodes

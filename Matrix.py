@@ -37,7 +37,9 @@ class Matrix:
             ]
 
     def multiply(m1, m2):
-        assert m1.cols == m2.rows, "Cols of m1 are not equal to rows of m2"
+        assert (
+            m1.cols == m2.rows
+        ), f"Cols of m1 are not equal to rows of m2\nCols of m1 are {m1.cols}\nRows of m2 are {m2.rows}"
         if m1.name is None or m2.name is None:
             result = Matrix(m1.rows, m2.cols)
         else:
