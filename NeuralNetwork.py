@@ -48,15 +48,6 @@ class NeuralNetwork:
     def dsigmoid(self, y):
         return y * (1 - y)
 
-    # continue creating train function...
-    def train(self):
-        assert (
-            self.isTraining == False
-        ), "\nThe model is already training.\nTrain was called again."
-        assert (
-            self.compiled
-        ), "\nThe model is not compiled. Training can only be done after the model is compiled."
-
     # private function which calculates the generated between two layers.
     def __predictLayer(self, index_l2, results_l1):
         # inputs of the previous layer
