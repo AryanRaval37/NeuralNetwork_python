@@ -26,13 +26,18 @@ class Matrix:
                 + f"\tCols: {self.cols}\n"
             )
 
-    def multiply(self, n):
+    def hadamardProduct(self, n):
         if isinstance(n, Matrix):
             assert (
                 self.rows == n.rows and self.cols == n.cols
             ), "Invalid Matrix Provided"
             self.data = [
                 [(self.data[i][j] * n.data[i][j]) for j in range(self.cols)]
+                for i in range(self.rows)
+            ]
+        elif isinstance(n, numbers.Number):
+            self.data = [
+                [(self.data[i][j] * n) for j in range(self.cols)]
                 for i in range(self.rows)
             ]
 

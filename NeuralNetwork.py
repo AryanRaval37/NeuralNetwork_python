@@ -1,3 +1,4 @@
+import numbers
 from Matrix import Matrix as matrix
 import math
 
@@ -10,7 +11,7 @@ class NeuralNetwork:
         elif "inputs" in obj.keys():
             self.inputNodes = obj["inputs"]
         if "Outputs" in obj.keys():
-            self.outpuNodes = obj["Outputs"]
+            self.outputNodes = obj["Outputs"]
         elif "outputs" in obj.keys():
             self.outputNodes = obj["outputs"]
         assert (
@@ -44,7 +45,7 @@ class NeuralNetwork:
         return 1 / (1 + math.exp(-x))
 
     # derivative of Sigmoid function       |*_*| CALCULUS |*_*|
-    def dsigmoid(y):
+    def dsigmoid(self, y):
         return y * (1 - y)
 
     # continue creating train function...
@@ -69,22 +70,92 @@ class NeuralNetwork:
         # returning the outputs
         return outputs
 
+    def mapLR(self, x):
+        return x * self.learning_rate
+
+    # function to change the learning rate of the network.
+    def setLearningRate(self, lr):
+        assert isinstance(
+            lr, numbers.Number
+        ), "\nThe learning rate given is not a number."
+        assert lr > 0 and lr <= 2.5, "\nInvalid learning rate given."
+        self.learning_rate = lr
+
+    def train(self, input_array, target_array):
+        assert isinstance(
+            input_array, list
+        ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
+        assert (
+            len(input_array) == self.inputNodes
+        ), "\n\nThe number of inputs provided to train are not matching\nto the number of inputNodes mentioned before."
+        assert (
+            len(target_array) == self.outputNodes
+        ), "\n\nThe number of targets provided to the train function are not matching\nto the number of outputs mentioned before."
+        assert (
+            self.compiled
+        ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
+        assert self.isTraining == False, "\n\nThe model is already training."
+
+        self.isTraining = True
+
+        # adding the inputs to the input layer.
+        self.layers[0].inputList = input_array
+        # converting it to a matrix
+        self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
+
+        # producing outputs for the inputs with the first layer.
+        previousPrediction = self.__predictLayer(1, self.layers[0].inputMatrix)
+
+        # innitially i has to be two as the outputs of the first layer with the 0 layer
+        # (input layer) are alrealy done.
+        i = 2
+        layerPredictions = []
+        layerPredictions.append(self.layers[0].inputMatrix)
+        layerPredictions.append(previousPrediction)
+        while i <= len(self.layers) - 1:
+            previousPrediction = self.__predictLayer(i, previousPrediction)
+            layerPredictions.append(previousPrediction)
+            i += 1
+        outputs = previousPrediction
+
+        # converting target list to matrix.
+        targets = matrix.toMatrix(target_array)
+
+        # ERROR = DESIRED - GUESS
+        # Therefore first calculating guess and subtracting from target
+        output_errors = matrix.subtract(targets, outputs)
+        Errors = output_errors
+        i = len(self.layers) - 1
+        while i >= 1:
+            # print("Index i:")
+            # print(i)
+            layer2 = self.layers[i]
+
+            # calculaing gradients between layer i and i-1
+            gradients = matrix.map(layerPredictions[i], self.dsigmoid)
+            gradients.hadamardProduct(Errors)
+            gradients = matrix.map(gradients, self.mapLR)
+
+            # calculating change in weights
+            l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
+            weights_l2l1_deltas = matrix.multiply(gradients, l1_predictions_transposed)
+
+            # changing the weights of layer i
+            layer2.weights.add(weights_l2l1_deltas)
+            layer2.bias.add(gradients)
+
+            # calculating the errors for the next layer for next iteration in loop
+            weights_l2l1_transposed = matrix.transpose(layer2.weights)
+            Errors = matrix.multiply(weights_l2l1_transposed, Errors)
+
+            # reassigning layer2 to the actualy layers
+            self.layers[i] = layer2
+            i -= 1
+        self.isTraining = False
+        # print("Finished training.")
+
     # public function the predict the outputs for given inputs
     def predict(self, input_array):
-
-        # predict function works. However it is giving numbers very close to one when the number
-        # of layers are increased. Guessed Reaseon. There are no negative numbers here.
-        # every layer, the bias gets added (which is random)
-        # multiplication hardly recuded the numbers as compared the addition of the bias.
-        # is this supposed to happen??
-        # will this give an accurate result when trained???
-
-        # The error cause given above is WRONG...  ✌️ ✌️ ✌️
-        # Error : The weights of the network should be initiallized from -1 to 1
-        #         and not 0 to 1.
-
-        # This fixed the problem. Remove This in the next commit.
-
         assert isinstance(
             input_array, list
         ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
@@ -103,24 +174,15 @@ class NeuralNetwork:
         # converting it to a matrix
         self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
 
-        # just for monitoring progress do remove later
-        print(self.layers[0].inputMatrix)
         # producing outputs for the inputs with the first layer.
         previousPrediction = self.__predictLayer(1, self.layers[0].inputMatrix)
-        print(previousPrediction)
 
         # innitially i has to be two as the outputs of the first layer with the 0 layer
         # (input layer) are alrealy done.
         i = 2
         while i <= len(self.layers) - 1:
-            # this is also for monitoring progress remove this later.
-            print(i)
-            print(previousPrediction)
             previousPrediction = self.__predictLayer(i, previousPrediction)
             i += 1
-
-        # remove later
-        print(previousPrediction)
         # converting the predictions to a list and then returning the list
         prediction = previousPrediction.toList()
         return prediction
