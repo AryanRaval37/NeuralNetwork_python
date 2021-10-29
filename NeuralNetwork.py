@@ -24,6 +24,8 @@ class NeuralNetwork:
         self.layers = []
         # boolean to check if the model is compiled.
         self.compiled = False
+        # training data in the network
+        self.data = []
         # adding the input layer to the network the moment it is created.
         self.layers.append(
             self.layer(
@@ -47,6 +49,15 @@ class NeuralNetwork:
     # derivative of Sigmoid function       |*_*| CALCULUS |*_*|
     def dsigmoid(self, y):
         return y * (1 - y)
+
+    def addData(self, input_array, target_array):
+        assert self.inputNodes == len(
+            input_array
+        ), "\n\nThe inputs provided to the addData function do match number of inputs mentioned earlier."
+        assert self.outputNodes == len(
+            target_array
+        ), "\n\nThe targets provided to the addData function do match number of outputs mentioned earlier."
+        self.data.append({"input": input_array, "target": target_array})
 
     # private function which calculates the generated between two layers.
     def __predictLayer(self, index_l2, results_l1):
@@ -72,7 +83,72 @@ class NeuralNetwork:
         assert lr > 0 and lr <= 2.5, "\nInvalid learning rate given."
         self.learning_rate = lr
 
-    def train(self, input_array, target_array):
+    def train(self):
+        assert (
+            self.compiled
+        ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
+        assert self.isTraining == False, "\n\nThe model is already training."
+
+        self.isTraining = True
+        for i in range(len(self.data)):
+            input_array = self.data[i]["input"]
+            target_array = self.data[i]["target"]
+            # adding the inputs to the input layer.
+            self.layers[0].inputList = input_array
+            # converting it to a matrix
+            self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
+
+            # producing outputs for the inputs with the first layer.
+            previousPrediction = self.__predictLayer(1, self.layers[0].inputMatrix)
+
+            # innitially i has to be two as the outputs of the first layer with the 0 layer
+            # (input layer) are alrealy done.
+            i = 2
+            layerPredictions = []
+            layerPredictions.append(self.layers[0].inputMatrix)
+            layerPredictions.append(previousPrediction)
+            while i <= len(self.layers) - 1:
+                previousPrediction = self.__predictLayer(i, previousPrediction)
+                layerPredictions.append(previousPrediction)
+                i += 1
+            outputs = previousPrediction
+
+            # converting target list to matrix.
+            targets = matrix.toMatrix(target_array)
+
+            # ERROR = DESIRED - GUESS
+            # Therefore first calculating guess and subtracting from target
+            output_errors = matrix.subtract(targets, outputs)
+            Errors = output_errors
+            i = len(self.layers) - 1
+            while i >= 1:
+                layer2 = self.layers[i]
+
+                # calculaing gradients between layer i and i-1
+                gradients = matrix.map(layerPredictions[i], self.dsigmoid)
+                gradients.simpleMultiply(Errors)
+                gradients = matrix.map(gradients, self.mapLR)
+
+                # calculating change in weights
+                l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
+                weights_l2l1_deltas = matrix.multiply(
+                    gradients, l1_predictions_transposed
+                )
+
+                # changing the weights of layer i
+                layer2.weights.add(weights_l2l1_deltas)
+                layer2.bias.add(gradients)
+
+                # calculating the errors for the next layer for next iteration in loop
+                weights_l2l1_transposed = matrix.transpose(layer2.weights)
+                Errors = matrix.multiply(weights_l2l1_transposed, Errors)
+
+                # reassigning layer2 to the actualy layers
+                self.layers[i] = layer2
+                i -= 1
+        self.isTraining = False
+
+    def trainData(self, input_array, target_array):
         assert isinstance(
             input_array, list
         ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
@@ -124,7 +200,7 @@ class NeuralNetwork:
 
             # calculaing gradients between layer i and i-1
             gradients = matrix.map(layerPredictions[i], self.dsigmoid)
-            gradients.hadamardProduct(Errors)
+            gradients.simpleMultiply(Errors)
             gradients = matrix.map(gradients, self.mapLR)
 
             # calculating change in weights
@@ -143,7 +219,6 @@ class NeuralNetwork:
             self.layers[i] = layer2
             i -= 1
         self.isTraining = False
-        # print("Finished training.")
 
     # public function the predict the outputs for given inputs
     def predict(self, input_array):

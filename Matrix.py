@@ -26,7 +26,7 @@ class Matrix:
                 + f"\tCols: {self.cols}\n"
             )
 
-    def hadamardProduct(self, n):
+    def simpleMultiply(self, n):
         if isinstance(n, Matrix):
             assert (
                 self.rows == n.rows and self.cols == n.cols
