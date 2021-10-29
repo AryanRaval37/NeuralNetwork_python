@@ -1,6 +1,7 @@
 import numbers
 from Matrix import Matrix as matrix
 import math
+import multiprocessing
 
 
 class NeuralNetwork:
@@ -221,7 +222,7 @@ class NeuralNetwork:
         self.isTraining = False
 
     # public function the predict the outputs for given inputs
-    def predict(self, input_array):
+    def predict(self, input_array, finishedTraining):
         assert isinstance(
             input_array, list
         ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
