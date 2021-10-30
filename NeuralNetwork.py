@@ -1,7 +1,7 @@
 import numbers
 from Matrix import Matrix as matrix
 import math
-import multiprocessing
+import concurrent.futures
 
 
 class NeuralNetwork:
@@ -222,7 +222,14 @@ class NeuralNetwork:
         self.isTraining = False
 
     # public function the predict the outputs for given inputs
-    def predict(self, input_array, finishedTraining):
+    def predict(self, input_array, onComplete):
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            results = [executor.submit(self.predictFast, input_array)]
+            for f in concurrent.futures.as_completed(results):
+                # print(f.result)
+                onComplete(f.result())
+
+    def predictFast(self, input_array):
         assert isinstance(
             input_array, list
         ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
