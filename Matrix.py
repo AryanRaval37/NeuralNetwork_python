@@ -26,6 +26,13 @@ class Matrix:
                 + f"\tCols: {self.cols}\n"
             )
 
+    def mean(self):
+        myList = self.toList()
+        total = 0
+        for i in range(len(myList)):
+            total += myList[i]
+        return total / len(myList)
+
     def simpleMultiply(self, n):
         if isinstance(n, Matrix):
             assert (
@@ -41,6 +48,7 @@ class Matrix:
                 for i in range(self.rows)
             ]
 
+    @staticmethod
     def multiply(m1, m2):
         assert (
             m1.cols == m2.rows
@@ -69,11 +77,13 @@ class Matrix:
             [(fn(self.data[i][j])) for j in range(self.cols)] for i in range(self.rows)
         ]
 
-    def map(m, fn):
-        m.name = f"{m.name} (Mapped)"
-        m.data = [[fn(m.data[i][j]) for j in range(m.cols)] for i in range(m.rows)]
-        return m
+    @staticmethod
+    def map_static(m, fn):
+        result = Matrix(m.rows, m.cols, f"{m.name} (Mapped)")
+        result.data = [[fn(m.data[i][j]) for j in range(m.cols)] for i in range(m.rows)]
+        return result
 
+    @staticmethod
     def toMatrix(a, name=None):
         assert isinstance(a, List), "Invalid Parameters."
         if name is None:
@@ -91,6 +101,7 @@ class Matrix:
             for j in range(self.rows)
         ]
 
+    @staticmethod
     def subtract(a, b):
         assert isinstance(a, Matrix) and isinstance(b, Matrix), "Invalid Parameters."
         assert a.rows == b.rows and a.cols == b.cols, "Invalid Parameters"
@@ -120,6 +131,7 @@ class Matrix:
                 for i in range(self.rows)
             ]
 
+    @staticmethod
     def transpose(m):
         if m.name is None:
             result = Matrix(m.cols, m.rows, "Result")

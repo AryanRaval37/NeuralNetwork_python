@@ -2,6 +2,8 @@ import numbers
 from Matrix import Matrix as matrix
 import math
 import concurrent.futures
+from matplotlib.animation import FuncAnimation
+import matplotlib.pyplot as plt
 
 
 class NeuralNetwork:
@@ -84,13 +86,10 @@ class NeuralNetwork:
         assert lr > 0 and lr <= 2.5, "\nInvalid learning rate given."
         self.learning_rate = lr
 
-    def train(self):
-        assert (
-            self.compiled
-        ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
-        assert self.isTraining == False, "\n\nThe model is already training."
+    def mapLoss(self, x):
+        return x * x / 2
 
-        self.isTraining = True
+    def myTrain(self, whileTraining):
         for i in range(len(self.data)):
             input_array = self.data[i]["input"]
             target_array = self.data[i]["target"]
@@ -120,15 +119,20 @@ class NeuralNetwork:
             # ERROR = DESIRED - GUESS
             # Therefore first calculating guess and subtracting from target
             output_errors = matrix.subtract(targets, outputs)
+
+            costMatrix = matrix.map_static(output_errors, self.mapLoss)
+            loss = costMatrix.mean()
+            whileTraining(loss)
+
             Errors = output_errors
             i = len(self.layers) - 1
             while i >= 1:
                 layer2 = self.layers[i]
 
                 # calculaing gradients between layer i and i-1
-                gradients = matrix.map(layerPredictions[i], self.dsigmoid)
+                gradients = matrix.map_static(layerPredictions[i], self.dsigmoid)
                 gradients.simpleMultiply(Errors)
-                gradients = matrix.map(gradients, self.mapLR)
+                gradients.map(self.mapLR)
 
                 # calculating change in weights
                 l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
@@ -147,7 +151,30 @@ class NeuralNetwork:
                 # reassigning layer2 to the actualy layers
                 self.layers[i] = layer2
                 i -= 1
-        self.isTraining = False
+            # whileTraining(loss)
+        changedWeights = [0]
+        for i in range(1, len(self.layers)):
+            changedWeights.append(self.layers[i])
+        return changedWeights
+
+    def train(self, whileTraining, onComplete):
+        assert (
+            self.compiled
+        ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
+        assert self.isTraining == False, "\n\nThe model is already training."
+
+        self.isTraining = True
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            results = [executor.submit(self.myTrain, whileTraining)]
+            for f in concurrent.futures.as_completed(results):
+                updatedLayers = f.result()
+            for i in range(1, len(self.layers)):
+                self.layers[i] = updatedLayers[i]
+            self.isTraining = False
+            onComplete()
+
+    # Cost / Loss function : ( Do Implement )
+    #   C = 1/2 * (Guess - Desired)^2
 
     def trainData(self, input_array, target_array):
         assert isinstance(
@@ -195,14 +222,12 @@ class NeuralNetwork:
         Errors = output_errors
         i = len(self.layers) - 1
         while i >= 1:
-            # print("Index i:")
-            # print(i)
             layer2 = self.layers[i]
 
             # calculaing gradients between layer i and i-1
-            gradients = matrix.map(layerPredictions[i], self.dsigmoid)
+            gradients = matrix.map_static(layerPredictions[i], self.dsigmoid)
             gradients.simpleMultiply(Errors)
-            gradients = matrix.map(gradients, self.mapLR)
+            gradients.map(self.mapLR)
 
             # calculating change in weights
             l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
@@ -226,7 +251,6 @@ class NeuralNetwork:
         with concurrent.futures.ProcessPoolExecutor() as executor:
             results = [executor.submit(self.predictFast, input_array)]
             for f in concurrent.futures.as_completed(results):
-                # print(f.result)
                 onComplete(f.result())
 
     def predictFast(self, input_array):
@@ -259,6 +283,7 @@ class NeuralNetwork:
             i += 1
         # converting the predictions to a list and then returning the list
         prediction = previousPrediction.toList()
+        self.PredictTest = True
         return prediction
 
     # private function to connect two layers:
