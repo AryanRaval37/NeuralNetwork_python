@@ -2,6 +2,7 @@ import numbers
 from Matrix import Matrix as matrix
 import math
 import concurrent.futures
+from multiprocessing import Queue, Process
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 
@@ -63,7 +64,7 @@ class NeuralNetwork:
         self.data.append({"input": input_array, "target": target_array})
 
     # private function which calculates the generated between two layers.
-    def __predictLayer(self, index_l2, results_l1):
+    def predictLayer(self, index_l2, results_l1):
         # inputs of the previous layer
         inputs = results_l1
         # matrix product of the weights and the inputs
@@ -89,26 +90,27 @@ class NeuralNetwork:
     def mapLoss(self, x):
         return x * x / 2
 
-    def myTrain(self, whileTraining):
-        for i in range(len(self.data)):
-            input_array = self.data[i]["input"]
-            target_array = self.data[i]["target"]
+    @staticmethod
+    def trainNotToBeUsed(nn, queue):
+        for i in range(len(nn.data)):
+            input_array = nn.data[i]["input"]
+            target_array = nn.data[i]["target"]
             # adding the inputs to the input layer.
-            self.layers[0].inputList = input_array
+            nn.layers[0].inputList = input_array
             # converting it to a matrix
-            self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
+            nn.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
 
             # producing outputs for the inputs with the first layer.
-            previousPrediction = self.__predictLayer(1, self.layers[0].inputMatrix)
+            previousPrediction = nn.predictLayer(1, nn.layers[0].inputMatrix)
 
             # innitially i has to be two as the outputs of the first layer with the 0 layer
             # (input layer) are alrealy done.
             i = 2
             layerPredictions = []
-            layerPredictions.append(self.layers[0].inputMatrix)
+            layerPredictions.append(nn.layers[0].inputMatrix)
             layerPredictions.append(previousPrediction)
-            while i <= len(self.layers) - 1:
-                previousPrediction = self.__predictLayer(i, previousPrediction)
+            while i <= len(nn.layers) - 1:
+                previousPrediction = nn.predictLayer(i, previousPrediction)
                 layerPredictions.append(previousPrediction)
                 i += 1
             outputs = previousPrediction
@@ -120,19 +122,18 @@ class NeuralNetwork:
             # Therefore first calculating guess and subtracting from target
             output_errors = matrix.subtract(targets, outputs)
 
-            costMatrix = matrix.map_static(output_errors, self.mapLoss)
+            costMatrix = matrix.map_static(output_errors, nn.mapLoss)
             loss = costMatrix.mean()
-            whileTraining(loss)
 
             Errors = output_errors
-            i = len(self.layers) - 1
+            i = len(nn.layers) - 1
             while i >= 1:
-                layer2 = self.layers[i]
+                layer2 = nn.layers[i]
 
                 # calculaing gradients between layer i and i-1
-                gradients = matrix.map_static(layerPredictions[i], self.dsigmoid)
+                gradients = matrix.map_static(layerPredictions[i], nn.dsigmoid)
                 gradients.simpleMultiply(Errors)
-                gradients.map(self.mapLR)
+                gradients.map(nn.mapLR)
 
                 # calculating change in weights
                 l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
@@ -149,13 +150,12 @@ class NeuralNetwork:
                 Errors = matrix.multiply(weights_l2l1_transposed, Errors)
 
                 # reassigning layer2 to the actualy layers
-                self.layers[i] = layer2
+                nn.layers[i] = layer2
                 i -= 1
-            # whileTraining(loss)
         changedWeights = [0]
-        for i in range(1, len(self.layers)):
-            changedWeights.append(self.layers[i])
-        return changedWeights
+        for i in range(1, len(nn.layers)):
+            changedWeights.append(nn.layers[i])
+        queue.put(changedWeights)
 
     def train(self, whileTraining, onComplete):
         assert (
@@ -164,14 +164,20 @@ class NeuralNetwork:
         assert self.isTraining == False, "\n\nThe model is already training."
 
         self.isTraining = True
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            results = [executor.submit(self.myTrain, whileTraining)]
-            for f in concurrent.futures.as_completed(results):
-                updatedLayers = f.result()
-            for i in range(1, len(self.layers)):
-                self.layers[i] = updatedLayers[i]
-            self.isTraining = False
-            onComplete()
+        queue = Queue()
+        trainingProcess = Process(
+            target=self.__class__.trainNotToBeUsed, args=(self, queue)
+        )
+        trainingProcess.daemon = True
+        trainingProcess.start()
+        while trainingProcess.is_alive():
+            whileTraining()
+        updatedLayers = queue.get_nowait()
+        for i in range(1, len(self.layers)):
+            self.layers[i] = updatedLayers[i]
+        self.isTraining = False
+        print("Done Training...")
+        onComplete()
 
     # Cost / Loss function : ( Do Implement )
     #   C = 1/2 * (Guess - Desired)^2
@@ -199,7 +205,7 @@ class NeuralNetwork:
         self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
 
         # producing outputs for the inputs with the first layer.
-        previousPrediction = self.__predictLayer(1, self.layers[0].inputMatrix)
+        previousPrediction = self.predictLayer(1, self.layers[0].inputMatrix)
 
         # innitially i has to be two as the outputs of the first layer with the 0 layer
         # (input layer) are alrealy done.
@@ -208,7 +214,7 @@ class NeuralNetwork:
         layerPredictions.append(self.layers[0].inputMatrix)
         layerPredictions.append(previousPrediction)
         while i <= len(self.layers) - 1:
-            previousPrediction = self.__predictLayer(i, previousPrediction)
+            previousPrediction = self.predictLayer(i, previousPrediction)
             layerPredictions.append(previousPrediction)
             i += 1
         outputs = previousPrediction
@@ -273,13 +279,13 @@ class NeuralNetwork:
         self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
 
         # producing outputs for the inputs with the first layer.
-        previousPrediction = self.__predictLayer(1, self.layers[0].inputMatrix)
+        previousPrediction = self.predictLayer(1, self.layers[0].inputMatrix)
 
         # innitially i has to be two as the outputs of the first layer with the 0 layer
         # (input layer) are alrealy done.
         i = 2
         while i <= len(self.layers) - 1:
-            previousPrediction = self.__predictLayer(i, previousPrediction)
+            previousPrediction = self.predictLayer(i, previousPrediction)
             i += 1
         # converting the predictions to a list and then returning the list
         prediction = previousPrediction.toList()
