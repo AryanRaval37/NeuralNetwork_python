@@ -1,23 +1,16 @@
 import numbers
 from Matrix import Matrix as matrix
 import math
+import random
 import concurrent.futures
 from multiprocessing import Queue, Process
-from matplotlib.animation import FuncAnimation
-import matplotlib.pyplot as plt
 
 
 class NeuralNetwork:
-    def __init__(self, obj):
+    def __init__(self, inputs, outputs):
         # checking if there are any inputs or outputs as keys in obj
-        if "Inputs" in obj.keys():
-            self.inputNodes = obj["Inputs"]
-        elif "inputs" in obj.keys():
-            self.inputNodes = obj["inputs"]
-        if "Outputs" in obj.keys():
-            self.outputNodes = obj["Outputs"]
-        elif "outputs" in obj.keys():
-            self.outputNodes = obj["outputs"]
+        self.inputNodes = inputs
+        self.outputNodes = outputs
         assert (
             self.inputNodes <= 6400 or self.inputNodes is None
         ), "\n\nInvalid number of input nodes."
@@ -32,13 +25,7 @@ class NeuralNetwork:
         self.data = []
         # adding the input layer to the network the moment it is created.
         self.layers.append(
-            self.layer(
-                {
-                    "name": "Input_layer",
-                    "nodes": self.inputNodes,
-                    "SecretType_409612341024": "INPUT",
-                }
-            )
+            self.layer(name="Input_Layer", nodes=self.inputNodes, special="InPuT_0")
         )
         # learning rate of the network
         self.learning_rate = 0.1
@@ -91,73 +78,77 @@ class NeuralNetwork:
         return x * x / 2
 
     @staticmethod
-    def trainNotToBeUsed(nn, queue):
-        for i in range(len(nn.data)):
-            input_array = nn.data[i]["input"]
-            target_array = nn.data[i]["target"]
-            # adding the inputs to the input layer.
-            nn.layers[0].inputList = input_array
-            # converting it to a matrix
-            nn.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
+    def trainNotToBeUsed(nn, queue, epochs):
+        for _ in range(epochs):
+            random.shuffle(nn.data)
+            for i in range(len(nn.data)):
+                input_array = nn.data[i]["input"]
+                target_array = nn.data[i]["target"]
+                # adding the inputs to the input layer.
+                nn.layers[0].inputList = input_array
+                # converting it to a matrix
+                nn.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
 
-            # producing outputs for the inputs with the first layer.
-            previousPrediction = nn.predictLayer(1, nn.layers[0].inputMatrix)
+                # producing outputs for the inputs with the first layer.
+                previousPrediction = nn.predictLayer(1, nn.layers[0].inputMatrix)
 
-            # innitially i has to be two as the outputs of the first layer with the 0 layer
-            # (input layer) are alrealy done.
-            i = 2
-            layerPredictions = []
-            layerPredictions.append(nn.layers[0].inputMatrix)
-            layerPredictions.append(previousPrediction)
-            while i <= len(nn.layers) - 1:
-                previousPrediction = nn.predictLayer(i, previousPrediction)
+                # innitially i has to be two as the outputs of the first layer with the 0 layer
+                # (input layer) are alrealy done.
+                i = 2
+                layerPredictions = []
+                layerPredictions.append(nn.layers[0].inputMatrix)
                 layerPredictions.append(previousPrediction)
-                i += 1
-            outputs = previousPrediction
+                while i <= len(nn.layers) - 1:
+                    previousPrediction = nn.predictLayer(i, previousPrediction)
+                    layerPredictions.append(previousPrediction)
+                    i += 1
+                outputs = previousPrediction
 
-            # converting target list to matrix.
-            targets = matrix.toMatrix(target_array)
+                # converting target list to matrix.
+                targets = matrix.toMatrix(target_array)
 
-            # ERROR = DESIRED - GUESS
-            # Therefore first calculating guess and subtracting from target
-            output_errors = matrix.subtract(targets, outputs)
+                # ERROR = DESIRED - GUESS
+                # Therefore first calculating guess and subtracting from target
+                output_errors = matrix.subtract(targets, outputs)
 
-            costMatrix = matrix.map_static(output_errors, nn.mapLoss)
-            loss = costMatrix.mean()
+                costMatrix = matrix.map_static(output_errors, nn.mapLoss)
+                loss = costMatrix.mean()
 
-            Errors = output_errors
-            i = len(nn.layers) - 1
-            while i >= 1:
-                layer2 = nn.layers[i]
+                Errors = output_errors
+                i = len(nn.layers) - 1
+                while i >= 1:
+                    layer2 = nn.layers[i]
 
-                # calculaing gradients between layer i and i-1
-                gradients = matrix.map_static(layerPredictions[i], nn.dsigmoid)
-                gradients.simpleMultiply(Errors)
-                gradients.map(nn.mapLR)
+                    # calculaing gradients between layer i and i-1
+                    gradients = matrix.map_static(layerPredictions[i], nn.dsigmoid)
+                    gradients.simpleMultiply(Errors)
+                    gradients.map(nn.mapLR)
 
-                # calculating change in weights
-                l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
-                weights_l2l1_deltas = matrix.multiply(
-                    gradients, l1_predictions_transposed
-                )
+                    # calculating change in weights
+                    l1_predictions_transposed = matrix.transpose(
+                        layerPredictions[i - 1]
+                    )
+                    weights_l2l1_deltas = matrix.multiply(
+                        gradients, l1_predictions_transposed
+                    )
 
-                # changing the weights of layer i
-                layer2.weights.add(weights_l2l1_deltas)
-                layer2.bias.add(gradients)
+                    # changing the weights of layer i
+                    layer2.weights.add(weights_l2l1_deltas)
+                    layer2.bias.add(gradients)
 
-                # calculating the errors for the next layer for next iteration in loop
-                weights_l2l1_transposed = matrix.transpose(layer2.weights)
-                Errors = matrix.multiply(weights_l2l1_transposed, Errors)
+                    # calculating the errors for the next layer for next iteration in loop
+                    weights_l2l1_transposed = matrix.transpose(layer2.weights)
+                    Errors = matrix.multiply(weights_l2l1_transposed, Errors)
 
-                # reassigning layer2 to the actualy layers
-                nn.layers[i] = layer2
-                i -= 1
+                    # reassigning layer2 to the actualy layers
+                    nn.layers[i] = layer2
+                    i -= 1
         changedWeights = [0]
         for i in range(1, len(nn.layers)):
             changedWeights.append(nn.layers[i])
         queue.put(changedWeights)
 
-    def train(self, whileTraining, onComplete):
+    def train(self, whileTraining, onComplete, epochs=1):
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
@@ -166,7 +157,7 @@ class NeuralNetwork:
         self.isTraining = True
         queue = Queue()
         trainingProcess = Process(
-            target=self.__class__.trainNotToBeUsed, args=(self, queue)
+            target=self.__class__.trainNotToBeUsed, args=[self, queue, epochs]
         )
         trainingProcess.daemon = True
         trainingProcess.start()
@@ -253,13 +244,13 @@ class NeuralNetwork:
         self.isTraining = False
 
     # public function the predict the outputs for given inputs
-    def predict(self, input_array, onComplete):
+    def predict_Async(self, input_array, onComplete):
         with concurrent.futures.ProcessPoolExecutor() as executor:
-            results = [executor.submit(self.predictFast, input_array)]
+            results = [executor.submit(self.predict, input_array)]
             for f in concurrent.futures.as_completed(results):
                 onComplete(f.result())
 
-    def predictFast(self, input_array):
+    def predict(self, input_array):
         assert isinstance(
             input_array, list
         ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
@@ -329,11 +320,7 @@ class NeuralNetwork:
         ), "\n\nThe model is already compiled.\n It cannot be recompiled."
         self.layers.append(
             self.layer(
-                {
-                    "name": "Output_layer",
-                    "nodes": self.outputNodes,
-                    "SecretType_409612341024": "OUTPUT",
-                }
+                name="Output_Layer", nodes=self.outputNodes, special="OuTpUt_last"
             )
         )
         for i in range(len(self.layers) - 1):
@@ -342,32 +329,24 @@ class NeuralNetwork:
 
     # layer class (inner class of the NeuralNetwork class)
     class layer:
-        def __init__(self, obj):
-            if "name" in obj.keys():
-                self.name = obj["name"]
-            elif "Name" in obj.keys():
-                self.name = obj["Name"]
-            else:
-                self.name = None
-
-            if "Nodes" in obj.keys():
-                self.nodes = obj["Nodes"]
-            elif "nodes" in obj.keys():
-                self.nodes = obj["nodes"]
-            else:
-                assert False, "\n\nError forming layer. Number of nodes is not given.\n"
-
+        def __init__(self, name=None, nodes=None, units=None, special=None):
+            if nodes is None and units is None:
+                assert (
+                    False
+                ), "\n\nThe number of nodes/units in the layer are not specified.\n"
+            if nodes is not None:
+                self.nodes = nodes
+            if units is not None:
+                self.nodes = units
             if self.nodes > 6400 or self.nodes is None:
                 assert False, "\n\nThe number of nodes is not valid.\n"
 
-            if "SecretType_409612341024" in obj.keys():
-                self.type = obj["SecretType_409612341024"]
-                if self.type == "INPUT":
-                    self.inputList = None
-                    self.inputMatrix = None
-                if self.type == "OUTPUT":
-                    self.outputList = None
-                    self.outputMatrix = None
+            self.name = name
+
+            if special == "InPuT_0":
+                self.type = "INPUT"
+            elif special == "OuTpUt_last":
+                self.type = "OUTPUT"
             else:
                 self.type = None
 
