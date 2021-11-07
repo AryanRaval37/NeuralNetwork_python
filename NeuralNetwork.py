@@ -4,6 +4,21 @@ import math
 import random
 import concurrent.futures
 from multiprocessing import Queue, Process
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# Error : on Plotting the Epochs.
+# Not showing correct number of epochs in plot
+# Guessed reason :
+#   1) The Matplotlib plot starts after a while after the actual whileTraining function begins.
+#   2) The training case here is very easy. Train puts data in the queue very fast.
+#      Queue.get() extracts the data one at a time so the queue instead of having only one element starts filling up.
+#      Try queue.get_nowait() and see if you get exception of queue empty to test error logic.
+# Therefore here check error and display the correct number of Epochs. Change plot styles.
+# Increase animation frame rate to max possible. Decrease number of times losses are plotted.
+# if not fixed make a system to remove previous queue element if new element needs to come.
+# or make a system of queues sharing only one element of data.
+# Fix error till next Commit and then merge with main branch.
 
 
 class NeuralNetwork:
@@ -78,9 +93,44 @@ class NeuralNetwork:
         return x * x / 2
 
     @staticmethod
-    def trainNotToBeUsed(nn, queue, epochs):
-        for _ in range(epochs):
+    def myLossPlotter(queue, endQueue):
+        anim = None
+        data = []
+        fig, ax = plt.subplots()
+
+        def animate(i):
+            if not queue.empty():
+                queueData = queue.get()
+                data.append(queueData[0])
+                ax.clear()
+                ax.plot(data)
+                # ax.set_title("Training Process")
+            if not endQueue.empty():
+                shouldPlot = endQueue.get()
+                if not shouldPlot:
+                    anim.event_source.stop()
+
+        anim = FuncAnimation(fig, animate, interval=5)
+        # plt.style.use("fivethirtyeight")
+        # plt.xlabel("Epochs")
+        # plt.ylabel("Loss / Cost")
+        plt.show()
+
+    @staticmethod
+    def trainNotToBeUsed(nn, queue, epochs, plot_interval, lossQueue):
+        epochLosses = []
+        k = 1
+        queue1 = Queue()
+        endQueue = Queue()
+        plotingProcess = Process(
+            target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue]
+        )
+        plotingProcess.daemon = False
+        plotingProcess.start()
+        for epochCounter in range(epochs):
             random.shuffle(nn.data)
+            # training an epoch
+            epochLosses = []
             for i in range(len(nn.data)):
                 input_array = nn.data[i]["input"]
                 target_array = nn.data[i]["target"]
@@ -113,6 +163,7 @@ class NeuralNetwork:
 
                 costMatrix = matrix.map_static(output_errors, nn.mapLoss)
                 loss = costMatrix.mean()
+                epochLosses.append(loss)
 
                 Errors = output_errors
                 i = len(nn.layers) - 1
@@ -143,12 +194,27 @@ class NeuralNetwork:
                     # reassigning layer2 to the actualy layers
                     nn.layers[i] = layer2
                     i -= 1
+                # End of Backpropogation
+            # End of going through all data (End of an EPOCH)
+            sum = 0
+            for i in range(len(epochLosses)):
+                sum += epochLosses[i]
+            meanLoss = sum / len(epochLosses)
+            if epochCounter + 1 >= plot_interval * k:
+                # checking if it is time to plot
+                queue1.put([meanLoss, epochCounter + 1])
+                k += 1
+            # passing this to whileDoing function from main function call
+            lossQueue.put([epochCounter + 1, meanLoss])
+        # End of going through all the epochs (Training complete)
         changedWeights = [0]
         for i in range(1, len(nn.layers)):
             changedWeights.append(nn.layers[i])
         queue.put(changedWeights)
+        lossQueue.put(False)
+        endQueue.put(False)
 
-    def train(self, whileTraining, onComplete, epochs=1):
+    def train(self, whileTraining, onComplete, epochs=1, plotInterval=10):
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
@@ -156,13 +222,18 @@ class NeuralNetwork:
 
         self.isTraining = True
         queue = Queue()
+        lossQueue = Queue()
         trainingProcess = Process(
-            target=self.__class__.trainNotToBeUsed, args=[self, queue, epochs]
+            target=self.__class__.trainNotToBeUsed,
+            args=[self, queue, epochs, plotInterval, lossQueue],
         )
-        trainingProcess.daemon = True
+        trainingProcess.daemon = False
         trainingProcess.start()
         while trainingProcess.is_alive():
-            whileTraining()
+            EpochInfo = lossQueue.get()
+            if not EpochInfo:
+                break
+            whileTraining(EpochInfo[0], EpochInfo[1])
         updatedLayers = queue.get_nowait()
         for i in range(1, len(self.layers)):
             self.layers[i] = updatedLayers[i]
