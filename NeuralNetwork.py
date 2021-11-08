@@ -7,18 +7,9 @@ from multiprocessing import Queue, Process
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
-# Error : on Plotting the Epochs.
-# Not showing correct number of epochs in plot
-# Guessed reason :
-#   1) The Matplotlib plot starts after a while after the actual whileTraining function begins.
-#   2) The training case here is very easy. Train puts data in the queue very fast.
-#      Queue.get() extracts the data one at a time so the queue instead of having only one element starts filling up.
-#      Try queue.get_nowait() and see if you get exception of queue empty to test error logic.
-# Therefore here check error and display the correct number of Epochs. Change plot styles.
-# Increase animation frame rate to max possible. Decrease number of times losses are plotted.
-# if not fixed make a system to remove previous queue element if new element needs to come.
-# or make a system of queues sharing only one element of data.
-# Fix error till next Commit and then merge with main branch.
+# Fixed plot function added more visual plots
+# look up and add changing learning rates.
+# think up of what to do next
 
 
 class NeuralNetwork:
@@ -95,38 +86,48 @@ class NeuralNetwork:
     @staticmethod
     def myLossPlotter(queue, endQueue):
         anim = None
-        data = []
+        xdata = []
+        ydata = []
         fig, ax = plt.subplots()
+        (In,) = plt.plot([], [])
+
+        def init():
+            ax.set_title("Training Process")
+            ax.set_xlabel("Epochs")
+            ax.set_ylabel("Loss / Cost")
+            return (In,)
 
         def animate(i):
-            if not queue.empty():
-                queueData = queue.get()
-                data.append(queueData[0])
-                ax.clear()
-                ax.plot(data)
-                # ax.set_title("Training Process")
+            while not queue.empty():
+                queueData = queue.get_nowait()
+                xdata.append(queueData[1])
+                ydata.append(queueData[0])
+            ax.cla()
+            init()
+            ax.plot(xdata, ydata, linewidth=2, color="green")
             if not endQueue.empty():
-                shouldPlot = endQueue.get()
-                if not shouldPlot:
+                shouldplot = endQueue.get()
+                if not shouldplot:
                     anim.event_source.stop()
+            return (In,)
 
-        anim = FuncAnimation(fig, animate, interval=5)
-        # plt.style.use("fivethirtyeight")
-        # plt.xlabel("Epochs")
-        # plt.ylabel("Loss / Cost")
+        anim = FuncAnimation(fig, animate, init_func=init, blit=True, interval=2)
+        plt.style.use("fivethirtyeight")
+        fig.set_size_inches(10, 7)
         plt.show()
 
     @staticmethod
-    def trainNotToBeUsed(nn, queue, epochs, plot_interval, lossQueue):
+    def trainNotToBeUsed(nn, queue, epochs, plot_interval, lossQueue, debug):
         epochLosses = []
         k = 1
-        queue1 = Queue()
-        endQueue = Queue()
-        plotingProcess = Process(
-            target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue]
-        )
-        plotingProcess.daemon = False
-        plotingProcess.start()
+        if debug:
+            queue1 = Queue()
+            endQueue = Queue()
+            plotingProcess = Process(
+                target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue]
+            )
+            plotingProcess.daemon = True
+            plotingProcess.start()
         for epochCounter in range(epochs):
             random.shuffle(nn.data)
             # training an epoch
@@ -200,10 +201,11 @@ class NeuralNetwork:
             for i in range(len(epochLosses)):
                 sum += epochLosses[i]
             meanLoss = sum / len(epochLosses)
-            if epochCounter + 1 >= plot_interval * k:
-                # checking if it is time to plot
-                queue1.put([meanLoss, epochCounter + 1])
-                k += 1
+            if debug:
+                if epochCounter + 1 >= plot_interval * k:
+                    # checking if it is time to plot
+                    queue1.put([meanLoss, epochCounter + 1])
+                    k += 1
             # passing this to whileDoing function from main function call
             lossQueue.put([epochCounter + 1, meanLoss])
         # End of going through all the epochs (Training complete)
@@ -212,20 +214,32 @@ class NeuralNetwork:
             changedWeights.append(nn.layers[i])
         queue.put(changedWeights)
         lossQueue.put(False)
-        endQueue.put(False)
+        if debug:
+            endQueue.put(False)
+            plotingProcess.join()
 
-    def train(self, whileTraining, onComplete, epochs=1, plotInterval=10):
+    def train(
+        self,
+        whileTraining,
+        onComplete,
+        epochs,
+        plotInterval=5,
+        debug=True,
+    ):
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
         assert self.isTraining == False, "\n\nThe model is already training."
+        assert (
+            plotInterval < epochs
+        ), "\n\nThe plot interval is less than the number of epochs.\n"
 
         self.isTraining = True
         queue = Queue()
         lossQueue = Queue()
         trainingProcess = Process(
             target=self.__class__.trainNotToBeUsed,
-            args=[self, queue, epochs, plotInterval, lossQueue],
+            args=[self, queue, epochs, plotInterval, lossQueue, debug],
         )
         trainingProcess.daemon = False
         trainingProcess.start()
@@ -234,14 +248,14 @@ class NeuralNetwork:
             if not EpochInfo:
                 break
             whileTraining(EpochInfo[0], EpochInfo[1])
-        updatedLayers = queue.get_nowait()
+        updatedLayers = queue.get()
         for i in range(1, len(self.layers)):
             self.layers[i] = updatedLayers[i]
         self.isTraining = False
         print("Done Training...")
         onComplete()
 
-    # Cost / Loss function : ( Do Implement )
+    # Cost / Loss function :
     #   C = 1/2 * (Guess - Desired)^2
 
     def trainData(self, input_array, target_array):
