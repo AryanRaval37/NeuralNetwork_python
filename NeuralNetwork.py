@@ -1,4 +1,5 @@
 import numbers
+from types import DynamicClassAttribute
 from Matrix import Matrix as matrix
 import math
 import random
@@ -6,10 +7,8 @@ import concurrent.futures
 from multiprocessing import Queue, Process
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-
-# Fixed plot function added more visual plots
-# look up and add changing learning rates.
-# think up of what to do next
+import json
+import warnings
 
 
 class NeuralNetwork:
@@ -37,6 +36,7 @@ class NeuralNetwork:
         self.learning_rate = 0.1
         # boolean to check if the model is training
         self.isTraining = False
+        warnings.simplefilter("default")
 
     # These functions cannot be private as they cannot be called by the matrix library.
     # the Activation function of the network
@@ -68,6 +68,94 @@ class NeuralNetwork:
         outputs.map(self.sigmoid)
         # returning the outputs
         return outputs
+
+    def save(self, filename):
+        assert (
+            self.compiled
+        ), "\n\nThe model is not compiled yet so it cannot be saved.\n"
+        assert not self.isTraining, "\n\nThe model is training and cannot be saved."
+        filenameSplit = filename.split(".")
+        assert (
+            filenameSplit[len(filenameSplit) - 1] == "json"
+        ), "\n\nInvalid saving file format.\n"
+        mylayers = [
+            {
+                "nodes": l.nodes,
+                "name": l.name,
+                "type": l.type,
+                "key": l.key,
+                "weights": l.weights.__dict__ if l.weights is not None else None,
+                "bias": l.bias.__dict__ if l.bias is not None else None,
+            }
+            for l in self.layers
+        ]
+        try:
+            with open(filename, "x", encoding="utf-8") as file:
+                mydataJSON = json.dumps(mylayers, ensure_ascii=False, indent=2)
+                file.write(mydataJSON)
+                file.close()
+        except:
+            for i in range(1, 10):
+                try:
+                    myFileName = ""
+                    for name in filenameSplit:
+                        if name == "json":
+                            break
+                        myFileName = myFileName + name
+                    myFileName = myFileName + f"_({i})" + ".json"
+                    with open(myFileName, "x", encoding="utf-8") as file:
+                        mydataJSON = json.dumps(mylayers, ensure_ascii=False, indent=2)
+                        file.write(mydataJSON)
+                        file.close()
+                    warnings.warn(
+                        f"\n\nA file with the given file name already exists.\nThe name of the file saved right now is now {myFileName}"
+                    )
+                    return
+                except:
+                    pass
+            assert (
+                False
+            ), "\n\nFile already exists. Change the file name to save the model.\n"
+
+    def load(self, filename):
+        assert not self.isTraining, "\n\nThe model is training and cannot be loaded."
+        with open(filename, "r", encoding="utf-8") as file:
+            try:
+                data = json.load(file)
+            except:
+                assert False, "\n\nThere was an error loading the file...\n"
+            file.close()
+        assert len(data) == len(
+            self.layers
+        ), "\n\nThe number of layers in the loaded data is not equal to the number of layers of this network.\nWrong configuration of data loaded from file.\nError loading the model."
+        correct = True
+        for i in range(len(data)):
+            if data[i]["nodes"] != self.layers[i].nodes:
+                correct = False
+                break
+        assert (
+            correct
+        ), f"\n\nThe number of nodes of layer {i} in the data, is not equal to the number of nodes of layer {i} in the network.\nWrong configuration of data loaded from file.\nError loading the model."
+        for l in data:
+            myLayer = self.layer(nodes=l["nodes"], name=l["name"])
+            myLayer.type = l["type"]
+            myLayer.key = l["key"]
+
+            if l["weights"] is not None and l["bias"] is not None:
+                myLayer.weights = matrix(
+                    rows=l["weights"]["rows"],
+                    cols=l["weights"]["cols"],
+                    name=l["weights"]["name"],
+                )
+                myLayer.weights.data = l["weights"]["data"]
+                myLayer.bias = matrix(
+                    rows=l["bias"]["rows"],
+                    cols=l["bias"]["cols"],
+                    name=l["bias"]["name"],
+                )
+                myLayer.bias.data = l["bias"]["data"]
+            self.layers[myLayer.key] = myLayer
+        print("Done Loading the model...")
 
     def mapLR(self, x):
         return x * self.learning_rate
@@ -221,7 +309,6 @@ class NeuralNetwork:
     def train(
         self,
         whileTraining,
-        onComplete,
         epochs,
         plotInterval=5,
         debug=True,
@@ -252,8 +339,6 @@ class NeuralNetwork:
         for i in range(1, len(self.layers)):
             self.layers[i] = updatedLayers[i]
         self.isTraining = False
-        print("Done Training...")
-        onComplete()
 
     # Cost / Loss function :
     #   C = 1/2 * (Guess - Desired)^2
@@ -408,6 +493,8 @@ class NeuralNetwork:
                 name="Output_Layer", nodes=self.outputNodes, special="OuTpUt_last"
             )
         )
+        self.layers[0].key = 0
+        self.layers[len(self.layers) - 1].key = len(self.layers) - 1
         for i in range(len(self.layers) - 1):
             self.__connect(i, i + 1)
         self.compiled = True
