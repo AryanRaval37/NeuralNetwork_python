@@ -1,5 +1,4 @@
 import numbers
-from types import DynamicClassAttribute
 from Matrix import Matrix as matrix
 import math
 import random
@@ -119,23 +118,30 @@ class NeuralNetwork:
 
     def load(self, filename):
         assert not self.isTraining, "\n\nThe model is training and cannot be loaded."
+        filenameSplit = filename.split(".")
+        assert (
+            filenameSplit[len(filenameSplit) - 1] == "json"
+        ), "\n\nInvalid loading file format.\nCan load only JSON files.\n"
+        del filenameSplit
         with open(filename, "r", encoding="utf-8") as file:
             try:
                 data = json.load(file)
             except:
                 assert False, "\n\nThere was an error loading the file...\n"
             file.close()
+        assert isinstance(
+            data, list
+        ), "\n\nThe data loaded from the file is not of required format."
         assert len(data) == len(
             self.layers
         ), "\n\nThe number of layers in the loaded data is not equal to the number of layers of this network.\nWrong configuration of data loaded from file.\nError loading the model."
-        correct = True
         for i in range(len(data)):
-            if data[i]["nodes"] != self.layers[i].nodes:
-                correct = False
-                break
-        assert (
-            correct
-        ), f"\n\nThe number of nodes of layer {i} in the data, is not equal to the number of nodes of layer {i} in the network.\nWrong configuration of data loaded from file.\nError loading the model."
+            assert (
+                data[i]["key"] == self.layers[i].key
+            ), "\n\nThe order of layers in the file is incorrect.\nInvalid configuration of the file."
+            assert (
+                data[i]["nodes"] == self.layers[i].nodes
+            ), f"\n\nThe number of nodes of layer {i} in the data, is not equal to the number of nodes of layer {i} in the network.\nWrong configuration of data loaded from file.\nError loading the model."
         for l in data:
             myLayer = self.layer(nodes=l["nodes"], name=l["name"])
             myLayer.type = l["type"]
@@ -155,7 +161,6 @@ class NeuralNetwork:
                 )
                 myLayer.bias.data = l["bias"]["data"]
             self.layers[myLayer.key] = myLayer
-        print("Done Loading the model...")
 
     def mapLR(self, x):
         return x * self.learning_rate
