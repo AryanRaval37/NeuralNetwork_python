@@ -68,7 +68,7 @@ class NeuralNetwork:
         # returning the outputs
         return outputs
 
-    def save(self, filename):
+    def save(self, filename, infoName=""):
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet so it cannot be saved.\n"
@@ -88,6 +88,18 @@ class NeuralNetwork:
             }
             for l in self.layers
         ]
+        mylayers.insert(
+            0,
+            {
+                "Contents": "NeuralNetwork Model",
+                "Info_Name": infoName if infoName != "" else "Untitiled",
+                "Config_Info": {
+                    "layers": len(self.layers),
+                    "layer_nodes": [l.nodes for l in self.layers],
+                    "layer_names": [l.name for l in self.layers],
+                },
+            },
+        )
         try:
             with open(filename, "x", encoding="utf-8") as file:
                 mydataJSON = json.dumps(mylayers, ensure_ascii=False, indent=2)
@@ -132,35 +144,36 @@ class NeuralNetwork:
         assert isinstance(
             data, list
         ), "\n\nThe data loaded from the file is not of required format."
-        assert len(data) == len(
+        assert len(data) - 1 == len(
             self.layers
         ), "\n\nThe number of layers in the loaded data is not equal to the number of layers of this network.\nWrong configuration of data loaded from file.\nError loading the model."
-        for i in range(len(data)):
+        for i in range(len(data) - 1):
             assert (
-                data[i]["key"] == self.layers[i].key
+                data[i + 1]["key"] == self.layers[i].key
             ), "\n\nThe order of layers in the file is incorrect.\nInvalid configuration of the file."
             assert (
-                data[i]["nodes"] == self.layers[i].nodes
+                data[i + 1]["nodes"] == self.layers[i].nodes
             ), f"\n\nThe number of nodes of layer {i} in the data, is not equal to the number of nodes of layer {i} in the network.\nWrong configuration of data loaded from file.\nError loading the model."
         for l in data:
-            myLayer = self.layer(nodes=l["nodes"], name=l["name"])
-            myLayer.type = l["type"]
-            myLayer.key = l["key"]
+            if not ("Contents" in l.keys()):
+                myLayer = self.layer(nodes=l["nodes"], name=l["name"])
+                myLayer.type = l["type"]
+                myLayer.key = l["key"]
 
-            if l["weights"] is not None and l["bias"] is not None:
-                myLayer.weights = matrix(
-                    rows=l["weights"]["rows"],
-                    cols=l["weights"]["cols"],
-                    name=l["weights"]["name"],
-                )
-                myLayer.weights.data = l["weights"]["data"]
-                myLayer.bias = matrix(
-                    rows=l["bias"]["rows"],
-                    cols=l["bias"]["cols"],
-                    name=l["bias"]["name"],
-                )
-                myLayer.bias.data = l["bias"]["data"]
-            self.layers[myLayer.key] = myLayer
+                if l["weights"] is not None and l["bias"] is not None:
+                    myLayer.weights = matrix(
+                        rows=l["weights"]["rows"],
+                        cols=l["weights"]["cols"],
+                        name=l["weights"]["name"],
+                    )
+                    myLayer.weights.data = l["weights"]["data"]
+                    myLayer.bias = matrix(
+                        rows=l["bias"]["rows"],
+                        cols=l["bias"]["cols"],
+                        name=l["bias"]["name"],
+                    )
+                    myLayer.bias.data = l["bias"]["data"]
+                self.layers[myLayer.key] = myLayer
 
     def mapLR(self, x):
         return x * self.learning_rate
