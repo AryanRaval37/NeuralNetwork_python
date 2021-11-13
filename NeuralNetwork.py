@@ -10,11 +10,62 @@ import json
 import warnings
 
 
+# Attemped to add direct classification
+# working code.
+# be more thoughtful about handling the labels
+# now the library can classify stuff !!!
+# refactor the code and finally commit to main branch
+
+
 class NeuralNetwork:
-    def __init__(self, inputs, outputs):
-        # checking if there are any inputs or outputs as keys in obj
+    def __init__(self, inputs, outputs=None, labels=None, task="Regression"):
+
         self.inputNodes = inputs
-        self.outputNodes = outputs
+        assert task in [
+            "Regression",
+            "regression",
+            "prediction",
+            "Prediction" "classification",
+            "Classification",
+        ], "\n\nInvalid task provided. Cannot form network.\n"
+
+        if task in ["Regression", "regression", "prediction", "Prediction"]:
+            self.task = "Regression"
+        elif task in ["Classification", "classification"]:
+            self.task = "Classification"
+        else:
+            assert False, "\n\nInvalid task provided. Cannot form network.\n"
+
+        # checking if at least one of them is valid
+        assert outputs is not None or labels is not None, (
+            "\n\nThe total number of labels are not provided to the network.\nError forming the network."
+            if self.task == "Classification"
+            else f"\n\nThe total number of outputs are not provided to the network.\nError forming the network."
+        )
+
+        # checking if both of them are given. Only one should be given.
+        assert not (outputs is not None and labels is not None), (
+            "\n\nBoth and outputs and labels were provided to the network.\nOnly "
+            + ("labels " if self.task == "Classification" else "outputs ")
+            + "was expected.\n Error forming the network."
+        )
+
+        # checking if given label/output match with the respective tasks
+        if outputs is None and self.task == "Regression":
+            assert (
+                False
+            ), "\nFor task Regression outputs should be given and not labels.\nError forming the network."
+        elif labels is None and self.task == "Classification":
+            assert (
+                False
+            ), "\nFor task Classification labels should be given and not outputs.\nError forming the network."
+
+        if outputs is not None:
+            self.outputNodes = outputs
+        else:
+            self.outputNodes = labels
+            self.labels = []
+
         assert (
             self.inputNodes <= 6400 or self.inputNodes is None
         ), "\n\nInvalid number of input nodes."
@@ -31,6 +82,7 @@ class NeuralNetwork:
         self.layers.append(
             self.layer(name="Input_Layer", nodes=self.inputNodes, special="InPuT_0")
         )
+
         # learning rate of the network
         self.learning_rate = 0.1
         # boolean to check if the model is training
@@ -46,14 +98,37 @@ class NeuralNetwork:
     def dsigmoid(self, y):
         return y * (1 - y)
 
-    def addData(self, input_array, target_array):
-        assert self.inputNodes == len(
-            input_array
-        ), "\n\nThe inputs provided to the addData function do match number of inputs mentioned earlier."
-        assert self.outputNodes == len(
-            target_array
-        ), "\n\nThe targets provided to the addData function do match number of outputs mentioned earlier."
-        self.data.append({"input": input_array, "target": target_array})
+    def addData(self, input_array, output):
+        if self.task == "Regression":
+            assert isinstance(
+                output, list
+            ), f"\n\nThe output given to addData for task Regression is a {type(output)}.\nExpected a list."
+            assert self.inputNodes == len(
+                input_array
+            ), "\n\nThe inputs provided to the addData function do not match number of inputs mentioned earlier."
+            assert self.outputNodes == len(
+                output
+            ), "\n\nThe targets provided to the addData function do not match number of outputs mentioned earlier."
+            self.data.append({"input": input_array, "target": output})
+        elif self.task == "Classification":
+            assert isinstance(
+                output, str
+            ), f"\n\nThe output given to addData for Classification is a {type(output)}.\nExpected a string."
+            assert self.inputNodes == len(
+                input_array
+            ), "\n\nThe inputs provided to the addData function do not match number of inputs mentioned earlier."
+            if not (output in self.labels):
+                assert (
+                    len(self.labels) < self.outputNodes
+                ), f"\n\nCannot add a data point with a new label. The number of labels added are already equal to the number of labels specified while creating the network."
+                self.labels.append(output)
+            # target_array = [
+            #     1 if i < len(self.labels) and self.labels[i] == output else 0
+            #     for i in range(self.outputNodes)
+            # ]
+            target_array = [0 for _ in range(self.outputNodes)]
+            target_array[self.labels.index(output)] = 1
+            self.data.append({"input": input_array, "target": target_array})
 
     # private function which calculates the generated between two layers.
     def predictLayer(self, index_l2, results_l1):
@@ -439,6 +514,9 @@ class NeuralNetwork:
                 onComplete(f.result())
 
     def predict(self, input_array):
+        assert (
+            self.task == "Regression"
+        ), "\n\nTask given is not Regression therefore cannnot predict."
         assert isinstance(
             input_array, list
         ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
@@ -468,8 +546,52 @@ class NeuralNetwork:
             i += 1
         # converting the predictions to a list and then returning the list
         prediction = previousPrediction.toList()
-        self.PredictTest = True
         return prediction
+
+    def classify(self, input_array):
+        # assert (
+        #     len(self.labels) == self.outputNodes
+        # ), "\n\nAll the labels have not yet been given.\nTo Classify, provide all the labels to the network."
+        assert (
+            self.task == "Classification"
+        ), f"\n\nTask given is not Classification therefore cannot classify."
+        assert isinstance(
+            input_array, list
+        ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
+        assert (
+            len(input_array) == self.inputNodes
+        ), "\n\nThe number of inputs provided to predict are not matching\nto the number of inputNodes mentioned before."
+        assert (
+            self.compiled
+        ), "\n\nThe model is not compiled yet.\n Compile the model to predict outputs.\n"
+        assert (
+            self.isTraining == False
+        ), "\n\nThe model is training it cannot predict results."
+
+        # adding the inputs to the input layer.
+        self.layers[0].inputList = input_array
+        # converting it to a matrix
+        self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
+
+        # producing outputs for the inputs with the first layer.
+        previousPrediction = self.predictLayer(1, self.layers[0].inputMatrix)
+
+        # innitially i has to be two as the outputs of the first layer with the 0 layer
+        # (input layer) are alrealy done.
+        i = 2
+        while i <= len(self.layers) - 1:
+            previousPrediction = self.predictLayer(i, previousPrediction)
+            i += 1
+        # converting the predictions to a list and then returning the list
+        prediction = previousPrediction.toList()
+        myMax = -math.inf
+        for num in prediction:
+            if num > myMax:
+                myMax = num
+        labelIndex = prediction.index(myMax)
+        if len(self.labels) > labelIndex:
+            Class = self.labels[labelIndex]
+            return {"class": Class, "confidence": myMax}
 
     # private function to connect two layers:
     # Connecting = creating matrices of suitable length and initiallzing randomly
