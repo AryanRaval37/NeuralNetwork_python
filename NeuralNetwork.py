@@ -116,16 +116,12 @@ class NeuralNetwork:
             ), f"\n\nThe output given to addData for Classification is a {type(output)}.\nExpected a string."
             assert self.inputNodes == len(
                 input_array
-            ), "\n\nThe inputs provided to the addData function do not match number of inputs mentioned earlier."
+            ), f"\n\nThe inputs provided to the addData function do not match number of inputs mentioned earlier.\nThe lenght is {len(input_array)}, expected : {self.inputNodes}"
             if not (output in self.labels):
                 assert (
                     len(self.labels) < self.outputNodes
                 ), f"\n\nCannot add a data point with a new label. The number of labels added are already equal to the number of labels specified while creating the network."
                 self.labels.append(output)
-            # target_array = [
-            #     1 if i < len(self.labels) and self.labels[i] == output else 0
-            #     for i in range(self.outputNodes)
-            # ]
             target_array = [0 for _ in range(self.outputNodes)]
             target_array[self.labels.index(output)] = 1
             self.data.append({"input": input_array, "target": target_array})
@@ -163,18 +159,33 @@ class NeuralNetwork:
             }
             for l in self.layers
         ]
-        mylayers.insert(
-            0,
-            {
-                "Contents": "NeuralNetwork Model",
-                "Info_Name": infoName if infoName != "" else "Untitiled",
-                "Config_Info": {
-                    "layers": len(self.layers),
-                    "layer_nodes": [l.nodes for l in self.layers],
-                    "layer_names": [l.name for l in self.layers],
+        if self.task == "Regression":
+            mylayers.insert(
+                0,
+                {
+                    "Contents": "NeuralNetwork Model",
+                    "Info_Name": infoName if infoName != "" else "Untitiled",
+                    "Config_Info": {
+                        "layers": len(self.layers),
+                        "layer_nodes": [l.nodes for l in self.layers],
+                        "layer_names": [l.name for l in self.layers],
+                    },
                 },
-            },
-        )
+            )
+        else:
+            mylayers.insert(
+                0,
+                {
+                    "Contents": "NeuralNetwork Model",
+                    "Info_Name": infoName if infoName != "" else "Untitiled",
+                    "Config_Info": {
+                        "layers": len(self.layers),
+                        "layer_nodes": [l.nodes for l in self.layers],
+                        "layer_names": [l.name for l in self.layers],
+                    },
+                    "labels": self.labels,
+                },
+            )
         try:
             with open(filename, "x", encoding="utf-8") as file:
                 mydataJSON = json.dumps(mylayers, ensure_ascii=False, indent=2)
@@ -249,6 +260,9 @@ class NeuralNetwork:
                     )
                     myLayer.bias.data = l["bias"]["data"]
                 self.layers[myLayer.key] = myLayer
+            else:
+                if self.task == "Classification":
+                    self.labels = l["labels"]
 
     def mapLR(self, x):
         return x * self.learning_rate
@@ -265,7 +279,7 @@ class NeuralNetwork:
         return x * x / 2
 
     @staticmethod
-    def myLossPlotter(queue, endQueue):
+    def myLossPlotter(queue, endQueue, plottingType):
         anim = None
         xdata = []
         ydata = []
@@ -274,7 +288,10 @@ class NeuralNetwork:
 
         def init():
             ax.set_title("Training Process")
-            ax.set_xlabel("Epochs")
+            if plottingType == "Data":
+                ax.set_xlabel("Data Points")
+            else:
+                ax.set_xlabel("Epochs")
             ax.set_ylabel("Loss / Cost")
             return (In,)
 
@@ -304,18 +321,24 @@ class NeuralNetwork:
         if debug:
             queue1 = Queue()
             endQueue = Queue()
-            plotingProcess = Process(
-                target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue]
-            )
+            if plot_interval < 1:
+                plotingProcess = Process(
+                    target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue, "Data"]
+                )
+            else:
+                plotingProcess = Process(
+                    target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue, "N"]
+                )
             plotingProcess.daemon = True
             plotingProcess.start()
         for epochCounter in range(epochs):
             random.shuffle(nn.data)
             # training an epoch
             epochLosses = []
-            for i in range(len(nn.data)):
-                input_array = nn.data[i]["input"]
-                target_array = nn.data[i]["target"]
+            z = 1
+            for d in range(len(nn.data)):
+                input_array = nn.data[d]["input"]
+                target_array = nn.data[d]["target"]
                 # adding the inputs to the input layer.
                 nn.layers[0].inputList = input_array
                 # converting it to a matrix
@@ -346,6 +369,8 @@ class NeuralNetwork:
                 costMatrix = matrix.map_static(output_errors, nn.mapLoss)
                 loss = costMatrix.mean()
                 epochLosses.append(loss)
+                if plot_interval == 0 and debug:
+                    queue1.put([loss, epochCounter * len(nn.data) + d])
 
                 Errors = output_errors
                 i = len(nn.layers) - 1
@@ -377,12 +402,17 @@ class NeuralNetwork:
                     nn.layers[i] = layer2
                     i -= 1
                 # End of Backpropogation
+                if debug and plot_interval > 0 and plot_interval < 1:
+                    if d + 1 >= int(plot_interval * len(nn.data)) * z:
+                        # should plot
+                        queue1.put([loss, (epochCounter + 1) * plot_interval])
+                        z += 1
             # End of going through all data (End of an EPOCH)
             sum = 0
             for i in range(len(epochLosses)):
                 sum += epochLosses[i]
             meanLoss = sum / len(epochLosses)
-            if debug:
+            if debug and plot_interval >= 1:
                 if epochCounter + 1 >= plot_interval * k:
                     # checking if it is time to plot
                     queue1.put([meanLoss, epochCounter + 1])
@@ -405,6 +435,7 @@ class NeuralNetwork:
         epochs,
         plotInterval=5,
         debug=True,
+        everyEpoch=False,
     ):
         assert (
             self.compiled
@@ -424,10 +455,13 @@ class NeuralNetwork:
         trainingProcess.daemon = False
         trainingProcess.start()
         while trainingProcess.is_alive():
-            EpochInfo = lossQueue.get()
-            if not EpochInfo:
-                break
-            whileTraining(EpochInfo[0], EpochInfo[1])
+            if everyEpoch:
+                EpochInfo = lossQueue.get()
+                if not EpochInfo:
+                    break
+                whileTraining(EpochInfo[0], EpochInfo[1])
+            else:
+                whileTraining()
         updatedLayers = queue.get()
         for i in range(1, len(self.layers)):
             self.layers[i] = updatedLayers[i]
