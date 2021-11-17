@@ -8,13 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import json
 import warnings
-
-
-# Attemped to add direct classification
-# working code.
-# be more thoughtful about handling the labels
-# now the library can classify stuff !!!
-# refactor the code and finally commit to main branch
+from numpy import array_split
 
 
 class NeuralNetwork:
@@ -78,6 +72,8 @@ class NeuralNetwork:
         self.compiled = False
         # training data in the network
         self.data = []
+        # testing data in the network
+        self.testingData = []
         # adding the input layer to the network the moment it is created.
         self.layers.append(
             self.layer(name="Input_Layer", nodes=self.inputNodes, special="InPuT_0")
@@ -103,6 +99,9 @@ class NeuralNetwork:
             assert isinstance(
                 output, list
             ), f"\n\nThe output given to addData for task Regression is a {type(output)}.\nExpected a list."
+            assert isinstance(
+                input_array, list
+            ), f"\n\nThe inputs provided to the addData function are of type {type(input_array)}.\nExpected list."
             assert self.inputNodes == len(
                 input_array
             ), "\n\nThe inputs provided to the addData function do not match number of inputs mentioned earlier."
@@ -114,6 +113,9 @@ class NeuralNetwork:
             assert isinstance(
                 output, str
             ), f"\n\nThe output given to addData for Classification is a {type(output)}.\nExpected a string."
+            assert isinstance(
+                input_array, list
+            ), f"\n\nThe inputs provided to the addData function are of type {type(input_array)}.\nExpected list."
             assert self.inputNodes == len(
                 input_array
             ), f"\n\nThe inputs provided to the addData function do not match number of inputs mentioned earlier.\nThe lenght is {len(input_array)}, expected : {self.inputNodes}"
@@ -125,6 +127,68 @@ class NeuralNetwork:
             target_array = [0 for _ in range(self.outputNodes)]
             target_array[self.labels.index(output)] = 1
             self.data.append({"input": input_array, "target": target_array})
+
+    def addTestingData(self, input_array, label):
+        assert (
+            self.task == "Classification"
+        ), "\nTesting data can only be added for the task Classification.\n"
+        assert isinstance(
+            label, str
+        ), f"The output given to addTestingData for Classification is a {type(label)}.\nExpected a string."
+        assert isinstance(
+            input_array, list
+        ), f"\n\nThe inputs provided to the addTestingData function are of type {type(input_array)}.\nExpected list."
+        assert self.inputNodes == len(
+            input_array
+        ), f"\n\nThe inputs provided to the addTestingData function do not match number of inputs mentioned earlier.\nThe lenght is {len(input_array)}, expected : {self.inputNodes}"
+        assert (
+            label in self.labels
+        ), f"\n\nThe label is not in the list of labels given to add the data.\nThe list is {self.labels}\nGot label {label}"
+        self.testingData.append({"input": input_array, "label": label})
+
+    @staticmethod
+    def myRunTest(nn, testing, q):
+        correct = 0
+        for data in testing:
+            inputs = data["input"]
+            label = data["label"]
+            classification = nn.classify(inputs)
+            dataClass = classification["class"]
+            if dataClass == label:
+                correct += 1
+        q.put(correct)
+
+    def runTest(self):
+        assert (
+            self.task == "Classification"
+        ), "\nTests can be run only for the task Classification.\n"
+        if len(self.testingData) == 0:
+            return
+        processes = []
+        testing = array_split(self.testingData, 5)
+        testing = [list(x) for x in testing]
+        q = Queue()
+        for i in range(5):
+            processes.append(Process(target=self.myRunTest, args=[self, testing[i], q]))
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join()
+        totalCorrect = 0
+        while not q.empty():
+            totalCorrect += q.get()
+        accuracy = totalCorrect / len(self.testingData) * 100
+        error = 100 - accuracy
+        wrong = len(self.testingData) - totalCorrect
+        del q
+        del processes
+        del testing
+        return {
+            "accuracy": accuracy,
+            "error": error,
+            "correct": totalCorrect,
+            "wrong": wrong,
+        }
 
     # private function which calculates the generated between two layers.
     def predictLayer(self, index_l2, results_l1):
@@ -405,7 +469,7 @@ class NeuralNetwork:
                 if debug and plot_interval > 0 and plot_interval < 1:
                     if d + 1 >= int(plot_interval * len(nn.data)) * z:
                         # should plot
-                        queue1.put([loss, (epochCounter + 1) * plot_interval])
+                        queue1.put([loss, (d + 1) * (epochCounter + 1)])
                         z += 1
             # End of going through all data (End of an EPOCH)
             sum = 0
