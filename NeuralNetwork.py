@@ -10,6 +10,8 @@ import json
 import warnings
 from numpy import array_split
 
+# Attempting to completely replace matrix library with mpmath.matrix
+
 
 class NeuralNetwork:
     def __init__(self, inputs, outputs=None, labels=None, task="Regression"):
