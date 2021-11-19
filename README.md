@@ -7,3 +7,9 @@ A developing NeuralNetwork library for python.
 - Saving and loading models is possible.
 - Inbuilt methods for both classification and regression.
 - Inbuilt testing of accuracy, error, etc.
+- High speed calculations powered by numpy.
+
+Requirements :
+- Numpy
+- matplotlib
+And in future, probably mpmath and numba...

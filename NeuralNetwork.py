@@ -1,6 +1,4 @@
 import numbers
-from Matrix import Matrix as matrix
-import math
 import random
 import concurrent.futures
 from multiprocessing import Queue, Process
@@ -8,9 +6,23 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import json
 import warnings
-from numpy import array_split
+import numpy as np
+import copy
 
-# Attempting to completely replace matrix library with mpmath.matrix
+# NOW THE LIBRARY IS POWERED BY NUMPY
+# atleast 25 times faster than previous version.
+# numpy support in matrices.
+# removed extra matrix file.
+
+# DO's:
+# take execution to GPU.
+# implement more numpy as smallest of calculations and arrays.
+# use mpmath for more precision while calculating numbers and matrices.
+# Test more on Regression and remove small bugs.
+
+# DONT's:
+# Do not use mpmath.matrix directly.
+# Will suffer slower execution than the old, slow looping matrix library.
 
 
 class NeuralNetwork:
@@ -90,12 +102,13 @@ class NeuralNetwork:
     # These functions cannot be private as they cannot be called by the matrix library.
     # the Activation function of the network
     def sigmoid(self, x):
-        return 1 / (1 + math.exp(-x))
+        return 1 / (1 + np.exp(-x))
 
     # derivative of Sigmoid function       |*_*| CALCULUS |*_*|
     def dsigmoid(self, y):
         return y * (1 - y)
 
+    # function to add training data to the network
     def addData(self, input_array, output):
         if self.task == "Regression":
             assert isinstance(
@@ -130,6 +143,7 @@ class NeuralNetwork:
             target_array[self.labels.index(output)] = 1
             self.data.append({"input": input_array, "target": target_array})
 
+    # function to add testing data to the network
     def addTestingData(self, input_array, label):
         assert (
             self.task == "Classification"
@@ -160,6 +174,7 @@ class NeuralNetwork:
                 correct += 1
         q.put(correct)
 
+    # method to run tests using testing data
     def runTest(self):
         assert (
             self.task == "Classification"
@@ -167,7 +182,7 @@ class NeuralNetwork:
         if len(self.testingData) == 0:
             return
         processes = []
-        testing = array_split(self.testingData, 5)
+        testing = np.array_split(self.testingData, 5)
         testing = [list(x) for x in testing]
         q = Queue()
         for i in range(5):
@@ -205,26 +220,32 @@ class NeuralNetwork:
         # returning the outputs
         return outputs
 
+    # function to save a compiled model
     def save(self, filename, infoName=""):
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet so it cannot be saved.\n"
         assert not self.isTraining, "\n\nThe model is training and cannot be saved."
         filenameSplit = filename.split(".")
-        assert (
-            filenameSplit[len(filenameSplit) - 1] == "json"
-        ), "\n\nInvalid saving file format.\n"
-        mylayers = [
-            {
-                "nodes": l.nodes,
-                "name": l.name,
-                "type": l.type,
-                "key": l.key,
-                "weights": l.weights.__dict__ if l.weights is not None else None,
-                "bias": l.bias.__dict__ if l.bias is not None else None,
-            }
-            for l in self.layers
-        ]
+        if filenameSplit[len(filenameSplit) - 1] != "json":
+            filenameSplit.append("json")
+        mylayers = []
+        for i in range(len(self.layers)):
+            l = copy.deepcopy(self.layers[i])
+            if l.weights is not None:
+                l.weights.data = l.weights.data.tolist()
+            if l.bias is not None:
+                l.bias.data = l.bias.data.tolist()
+            mylayers.append(
+                {
+                    "nodes": l.nodes,
+                    "name": l.name,
+                    "type": l.type,
+                    "key": l.key,
+                    "weights": l.weights.__dict__ if l.weights is not None else None,
+                    "bias": l.bias.__dict__ if l.bias is not None else None,
+                }
+            )
         if self.task == "Regression":
             mylayers.insert(
                 0,
@@ -274,12 +295,17 @@ class NeuralNetwork:
                         f"\n\nA file with the given file name already exists.\nThe name of the file saved right now is now {myFileName}"
                     )
                     return
+                except TypeError:
+                    assert (
+                        False
+                    ), "\n\nThere was some error in serialization of something into JSON object...\nCould not save the model."
                 except:
                     pass
             assert (
                 False
             ), "\n\nFile already exists. Change the file name to save the model.\n"
 
+    # function to load model from a file.
     def load(self, filename):
         assert not self.isTraining, "\n\nThe model is training and cannot be loaded."
         filenameSplit = filename.split(".")
@@ -317,14 +343,16 @@ class NeuralNetwork:
                         rows=l["weights"]["rows"],
                         cols=l["weights"]["cols"],
                         name=l["weights"]["name"],
+                        wait=True,
                     )
-                    myLayer.weights.data = l["weights"]["data"]
+                    myLayer.weights.data = np.array(l["weights"]["data"])
                     myLayer.bias = matrix(
                         rows=l["bias"]["rows"],
                         cols=l["bias"]["cols"],
                         name=l["bias"]["name"],
+                        wait=True,
                     )
-                    myLayer.bias.data = l["bias"]["data"]
+                    myLayer.bias.data = np.array(l["bias"]["data"])
                 self.layers[myLayer.key] = myLayer
             else:
                 if self.task == "Classification":
@@ -436,7 +464,7 @@ class NeuralNetwork:
                 loss = costMatrix.mean()
                 epochLosses.append(loss)
                 if plot_interval == 0 and debug:
-                    queue1.put([loss, epochCounter * len(nn.data) + d])
+                    queue1.put([loss, epochCounter * len(nn.data) + d + 1])
 
                 Errors = output_errors
                 i = len(nn.layers) - 1
@@ -471,7 +499,7 @@ class NeuralNetwork:
                 if debug and plot_interval > 0 and plot_interval < 1:
                     if d + 1 >= int(plot_interval * len(nn.data)) * z:
                         # should plot
-                        queue1.put([loss, (d + 1) * (epochCounter + 1)])
+                        queue1.put([loss, epochCounter * len(nn.data) + d + 1])
                         z += 1
             # End of going through all data (End of an EPOCH)
             sum = 0
@@ -684,7 +712,7 @@ class NeuralNetwork:
             i += 1
         # converting the predictions to a list and then returning the list
         prediction = previousPrediction.toList()
-        myMax = -math.inf
+        myMax = np.NINF
         for num in prediction:
             if num > myMax:
                 myMax = num
@@ -698,10 +726,8 @@ class NeuralNetwork:
     def __connect(self, index_l1, index_l2):
         nodes_l1 = self.layers[index_l1].nodes
         nodes_l2 = self.layers[index_l2].nodes
-        self.layers[index_l2].weights = matrix(nodes_l2, nodes_l1)
-        self.layers[index_l2].weights.randomize()
-        self.layers[index_l2].bias = matrix(nodes_l2, 1)
-        self.layers[index_l2].bias.randomize()
+        self.layers[index_l2].weights = matrix(nodes_l2, nodes_l1, "weights")
+        self.layers[index_l2].bias = matrix(nodes_l2, 1, "bias")
 
     # function too add an extra layer to the network
     def addLayer(self, Layer):
@@ -790,3 +816,102 @@ class NeuralNetwork:
                 print("Bias : ")
                 print(self.bias)
             return ""
+
+
+class matrix:
+    def __init__(self, rows, cols, name=None, wait=False):
+        self.rows = rows
+        self.cols = cols
+        self.name = name
+        if wait:
+            self.data = []
+        else:
+            self.data = np.random.uniform(-1, 1, (self.rows, self.cols))
+
+    def __str__(self):
+        print("\n")
+        print(self.data)
+        if self.name is None:
+            return "Matrix : \n" + f"\tRows: {self.rows}\n" + f"\tCols: {self.cols}\n"
+        else:
+            return (
+                f"Matrix : {self.name}\n"
+                + f"\tRows: {self.rows}\n"
+                + f"\tCols: {self.cols}\n"
+            )
+
+    def mean(self):
+        return np.average(self.data)
+
+    def simpleMultiply(self, n):
+        if isinstance(n, matrix):
+            assert (
+                self.rows == n.rows and self.cols == n.cols
+            ), "Invalid Matrix Provided"
+            self.data = np.multiply(self.data, n.data)
+        elif isinstance(n, numbers.Number):
+            self.data = self.data * n
+
+    @staticmethod
+    def multiply(m1, m2):
+        assert (
+            m1.cols == m2.rows
+        ), f"Cols of m1 are not equal to rows of m2\nCols of m1 are {m1.cols}\nRows of m2 are {m2.rows}"
+        if m1.name is None or m2.name is None:
+            result = matrix(m1.rows, m2.cols)
+        else:
+            result = matrix(m1.rows, m2.cols, f"Dot product ({m1.name}.{m2.name})")
+        result.data = np.dot(m1.data, m2.data)
+        return result
+
+    def toList(self):
+        return self.data.flatten().tolist()
+
+    def map(self, fn):
+        self.data = fn(self.data)
+
+    @staticmethod
+    def map_static(m, fn):
+        result = matrix(m.rows, m.cols, f"{m.name} (Mapped)")
+        result.data = fn(m.data)
+        return result
+
+    @staticmethod
+    def toMatrix(a, name=None):
+        assert isinstance(a, list), "Invalid Parameters."
+        if name is None:
+            m = matrix(len(a), 1)
+        else:
+            m = matrix(len(a), 1, name)
+        m.data = np.array(a).reshape(len(a), 1)
+        return m
+
+    @staticmethod
+    def subtract(a, b):
+        assert isinstance(a, matrix) and isinstance(b, matrix), "Invalid Parameters."
+        assert a.rows == b.rows and a.cols == b.cols, "Invalid Parameters"
+        if a.name is None or b.name is None:
+            result = matrix(a.rows, a.cols, "Results")
+        else:
+            result = matrix(a.rows, a.cols, f"Results({a.name}-{b.name})")
+        result.data = a.data - b.data
+        return result
+
+    def add(self, n):
+        assert isinstance(n, matrix) or isinstance(
+            n, numbers.Number
+        ), "\n\n\nInvalid Parameters\n"
+        if isinstance(n, matrix):
+            assert n.rows == self.rows and n.cols == self.cols, "Invalid Parameters"
+            self.data = self.data + n.data
+        else:
+            self.data = self.data + n
+
+    @staticmethod
+    def transpose(m):
+        if m.name is None:
+            result = matrix(m.cols, m.rows, "Result")
+        else:
+            result = matrix(m.cols, m.rows, f"{m.name} (Transposed)")
+        result.data = m.data.T
+        return result
