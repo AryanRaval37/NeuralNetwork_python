@@ -8,6 +8,17 @@ import json
 import warnings
 import numpy as np
 import copy
+from numba import njit, prange
+
+# right now attempting to use numba
+# for training, queue and nn is not compatible.
+# Forget about making train async function.
+# can call whileTraining in between.
+# use yield to return the losses without ending train.
+# in the train which user uses, directly yield the results and call plot from there.
+# use parallel = True and prange in place of range.
+# make sure code is on another branch and original code is saved.
+# if idea not working, then only use numpy and mpmath.
 
 # NOW THE LIBRARY IS POWERED BY NUMPY
 # atleast 25 times faster than previous version.
@@ -162,6 +173,7 @@ class NeuralNetwork:
         ), f"\n\nThe label is not in the list of labels given to add the data.\nThe list is {self.labels}\nGot label {label}"
         self.testingData.append({"input": input_array, "label": label})
 
+    # definitely put njit decorator and prange here.
     @staticmethod
     def myRunTest(nn, testing, q):
         correct = 0
@@ -409,6 +421,7 @@ class NeuralNetwork:
         plt.show()
 
     @staticmethod
+    # @njit(parallel=True)
     def trainNotToBeUsed(nn, queue, epochs, plot_interval, lossQueue, debug):
         epochLosses = []
         k = 1
@@ -425,11 +438,13 @@ class NeuralNetwork:
                 )
             plotingProcess.daemon = True
             plotingProcess.start()
+        # change this if numba does not work out
         for epochCounter in range(epochs):
             random.shuffle(nn.data)
             # training an epoch
             epochLosses = []
             z = 1
+            # change this if numba does not work out
             for d in range(len(nn.data)):
                 input_array = nn.data[d]["input"]
                 target_array = nn.data[d]["target"]
