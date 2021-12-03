@@ -8,6 +8,7 @@ import json
 import warnings
 import numpy as np
 import copy
+import time
 
 # NOW THE LIBRARY IS POWERED BY NUMPY
 # atleast 25 times faster than previous version.
@@ -15,13 +16,13 @@ import copy
 # removed extra matrix file.
 
 # DO's:
-# take execution to GPU.
-# implement more numpy as smallest of calculations and arrays.
-# use mpmath for more precision while calculating numbers and matrices.
-# Test more on Regression and remove small bugs.
+# take execution to GPU. ------ Not Possible...
+# implement more numpy as smallest of calculations and arrays. ------ will Do
+# use mpmath for more precision while calculating numbers and matrices. ----- will slow down but thinkable
+# Test more on Regression and remove small bugs. ------ sure do this...
 
 # DONT's:
-# Do not use mpmath.matrix directly.
+# Do not use mpmath.matrix directly. ------- NEVER EVER
 # Will suffer slower execution than the old, slow looping matrix library.
 
 
@@ -109,7 +110,7 @@ class NeuralNetwork:
         return y * (1 - y)
 
     # function to add training data to the network
-    def addData(self, input_array, output):
+    def addTrainingData(self, input_array, output):
         if self.task == "Regression":
             assert isinstance(
                 output, list
@@ -161,6 +162,28 @@ class NeuralNetwork:
             label in self.labels
         ), f"\n\nThe label is not in the list of labels given to add the data.\nThe list is {self.labels}\nGot label {label}"
         self.testingData.append({"input": input_array, "label": label})
+
+    def addData(self, data, threshold):
+        assert (
+            self.task == "Classification"
+        ), "\nTesting data can be added only for task Classification. To add Training data, use the addTrainingData method"
+        for d in data:
+            assert isinstance(
+                d, dict
+            ), "\nThe element of data array must be a dict containing input and label."
+            assert (
+                "input" in d.keys()
+            ), "\nThe inputs are not given in the dict of the data array."
+            assert (
+                "label" in d.keys()
+            ), "\nThe label is not given in the dict of the data array."
+        myData = np.split(data, [int(threshold * len(data)), len(data)])
+        trainingData = myData[0]
+        testingData = myData[1]
+        for d in trainingData:
+            self.addTrainingData(d["input"], d["label"])
+        for d in testingData:
+            self.addTestingData(d["input"], d["label"])
 
     @staticmethod
     def myRunTest(nn, testing, q):
@@ -547,6 +570,8 @@ class NeuralNetwork:
             args=[self, queue, epochs, plotInterval, lossQueue, debug],
         )
         trainingProcess.daemon = False
+        # time.sleep(1)
+        # print("Start training")
         trainingProcess.start()
         while trainingProcess.is_alive():
             if everyEpoch:
