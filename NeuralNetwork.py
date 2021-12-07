@@ -8,22 +8,13 @@ import json
 import warnings
 import numpy as np
 import copy
-import time
 
-# NOW THE LIBRARY IS POWERED BY NUMPY
-# atleast 25 times faster than previous version.
-# numpy support in matrices.
-# removed extra matrix file.
+# TODO : Implement Softmax. More information about implementation in oneNote.
 
-# DO's:
-# take execution to GPU. ------ Not Possible...
-# implement more numpy as smallest of calculations and arrays. ------ will Do
-# use mpmath for more precision while calculating numbers and matrices. ----- will slow down but thinkable
-# Test more on Regression and remove small bugs. ------ sure do this...
-
-# DONT's:
-# Do not use mpmath.matrix directly. ------- NEVER EVER
-# Will suffer slower execution than the old, slow looping matrix library.
+sigmoid = "-=-=-=-=-"
+tanh = "-=-=-=-=-=-"
+ReLU = "-=-=-=-=-=-=-"
+LeakyReLU = "-=-=-=-=-=-=-=-"
 
 
 class NeuralNetwork:
@@ -91,23 +82,19 @@ class NeuralNetwork:
         self.testingData = []
         # adding the input layer to the network the moment it is created.
         self.layers.append(
-            self.layer(name="Input_Layer", nodes=self.inputNodes, special="InPuT_0")
+            self.layer(
+                name="Input_Layer",
+                nodes=self.inputNodes,
+                special="InPuT_0",
+                activation=sigmoid,
+            )
         )
 
-        # learning rate of the network
+        # learning rate of the networks
         self.learning_rate = 0.1
         # boolean to check if the model is training
         self.isTraining = False
         warnings.simplefilter("default")
-
-    # These functions cannot be private as they cannot be called by the matrix library.
-    # the Activation function of the network
-    def sigmoid(self, x):
-        return 1 / (1 + np.exp(-x))
-
-    # derivative of Sigmoid function       |*_*| CALCULUS |*_*|
-    def dsigmoid(self, y):
-        return y * (1 - y)
 
     # function to add training data to the network
     def addTrainingData(self, input_array, output):
@@ -239,12 +226,34 @@ class NeuralNetwork:
         # adding the layers bias
         outputs.add(self.layers[index_l2].bias)
         # mapping it to a range between 0 and 1 by the sigmoid function
-        outputs.map(self.sigmoid)
+        # outputs.map(self.sigmoid)
+        # CHECK THIS FOR THE INPUT layer
+        # print(self.layers[index_l2].activation)
+        # print(self.Sigmoid)
+        outputs.map(self.layers[index_l2].activation)
         # returning the outputs
         return outputs
 
+    def __activationVarToStr(self, l):
+        var = l.activationVar
+        if var == sigmoid:
+            if l.type == "INPUT":
+                string = "None"
+            else:
+                string = "sigmoid"
+        elif var == tanh:
+            string = "tanh"
+        elif var == LeakyReLU:
+            string = "leakyReLU"
+        elif var == ReLU:
+            string = "reLU"
+        return string
+
     # function to save a compiled model
-    def save(self, filename, infoName=""):
+    # ! Warning:
+    # ! This function will round off weights to float64 and then save.
+    # ! So after loading the predictions by the model may not be the same.
+    def save(self, filename, infoName=None, moreInfo={}):
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet so it cannot be saved.\n"
@@ -256,15 +265,16 @@ class NeuralNetwork:
         for i in range(len(self.layers)):
             l = copy.deepcopy(self.layers[i])
             if l.weights is not None:
-                l.weights.data = l.weights.data.tolist()
+                l.weights.data = l.weights.data.astype("float64").tolist()
             if l.bias is not None:
-                l.bias.data = l.bias.data.tolist()
+                l.bias.data = l.bias.data.astype("float64").tolist()
             mylayers.append(
                 {
                     "nodes": l.nodes,
                     "name": l.name,
                     "type": l.type,
                     "key": l.key,
+                    "activation": l.activationVar,
                     "weights": l.weights.__dict__ if l.weights is not None else None,
                     "bias": l.bias.__dict__ if l.bias is not None else None,
                 }
@@ -274,11 +284,15 @@ class NeuralNetwork:
                 0,
                 {
                     "Contents": "NeuralNetwork Model",
-                    "Info_Name": infoName if infoName != "" else "Untitiled",
+                    "Info_Name": infoName if infoName is not None else "Untitiled",
+                    "MoreInfo": moreInfo,
                     "Config_Info": {
                         "layers": len(self.layers),
                         "layer_nodes": [l.nodes for l in self.layers],
                         "layer_names": [l.name for l in self.layers],
+                        "Activation_functions": [
+                            self.__activationVarToStr(l) for l in self.layers
+                        ],
                     },
                 },
             )
@@ -292,6 +306,9 @@ class NeuralNetwork:
                         "layers": len(self.layers),
                         "layer_nodes": [l.nodes for l in self.layers],
                         "layer_names": [l.name for l in self.layers],
+                        "Activation_functions": [
+                            self.__activationVarToStr(l) for l in self.layers
+                        ],
                     },
                     "labels": self.labels,
                 },
@@ -357,7 +374,14 @@ class NeuralNetwork:
             ), f"\n\nThe number of nodes of layer {i} in the data, is not equal to the number of nodes of layer {i} in the network.\nWrong configuration of data loaded from file.\nError loading the model."
         for l in data:
             if not ("Contents" in l.keys()):
-                myLayer = self.layer(nodes=l["nodes"], name=l["name"])
+                if "activation" in l.keys():
+                    myLayer = self.layer(
+                        nodes=l["nodes"], name=l["name"], activation=l["activation"]
+                    )
+                else:
+                    myLayer = self.layer(
+                        nodes=l["nodes"], name=l["name"], activation=sigmoid
+                    )
                 myLayer.type = l["type"]
                 myLayer.key = l["key"]
 
@@ -368,21 +392,23 @@ class NeuralNetwork:
                         name=l["weights"]["name"],
                         wait=True,
                     )
-                    myLayer.weights.data = np.array(l["weights"]["data"])
+                    myLayer.weights.data = np.array(
+                        l["weights"]["data"], dtype=np.float128
+                    )
                     myLayer.bias = matrix(
                         rows=l["bias"]["rows"],
                         cols=l["bias"]["cols"],
                         name=l["bias"]["name"],
                         wait=True,
                     )
-                    myLayer.bias.data = np.array(l["bias"]["data"])
+                    myLayer.bias.data = np.array(l["bias"]["data"], dtype=np.float128)
                 self.layers[myLayer.key] = myLayer
             else:
                 if self.task == "Classification":
                     self.labels = l["labels"]
 
     def mapLR(self, x):
-        return x * self.learning_rate
+        return np.float128(np.float128(x) * np.float128(self.learning_rate))
 
     # function to change the learning rate of the network.
     def setLearningRate(self, lr):
@@ -390,10 +416,10 @@ class NeuralNetwork:
             lr, numbers.Number
         ), "\nThe learning rate given is not a number."
         assert lr > 0 and lr <= 2.5, "\nInvalid learning rate given."
-        self.learning_rate = lr
+        self.learning_rate = np.float128(lr)
 
     def mapLoss(self, x):
-        return x * x / 2
+        return np.float128(x) * np.float128(x) / np.float128(2)
 
     @staticmethod
     def myLossPlotter(queue, endQueue, plottingType):
@@ -485,7 +511,7 @@ class NeuralNetwork:
 
                 costMatrix = matrix.map_static(output_errors, nn.mapLoss)
                 loss = costMatrix.mean()
-                epochLosses.append(loss)
+                epochLosses.append(np.float32(loss))
                 if plot_interval == 0 and debug:
                     queue1.put([loss, epochCounter * len(nn.data) + d + 1])
 
@@ -495,7 +521,10 @@ class NeuralNetwork:
                     layer2 = nn.layers[i]
 
                     # calculaing gradients between layer i and i-1
-                    gradients = matrix.map_static(layerPredictions[i], nn.dsigmoid)
+                    # gradients = matrix.map_static(layerPredictions[i], nn.dsigmoid)
+                    gradients = matrix.map_static(
+                        layerPredictions[i], layer2.dactivation
+                    )
                     gradients.simpleMultiply(Errors)
                     gradients.map(nn.mapLR)
 
@@ -772,16 +801,25 @@ class NeuralNetwork:
 
     # function to add output layer at the end and finalize the model
     # Connecting the layers = Initiallizing random weights
-    def compileModel(self):
+    def compileModel(self, activation=None):
         assert (
             self.isTraining == False
         ), "\n\nThe model is training it cannot predict results."
         assert (
             self.compiled == False
         ), "\n\nThe model is already compiled.\n It cannot be recompiled."
+
+        if activation is None:
+            warnings.warn(
+                f"\n\nThe activation function was not given for the output layer.\nUsing Sigmoid activation."
+            )
+            activation = sigmoid
         self.layers.append(
             self.layer(
-                name="Output_Layer", nodes=self.outputNodes, special="OuTpUt_last"
+                name="Output_Layer",
+                nodes=self.outputNodes,
+                special="OuTpUt_last",
+                activation=activation,
             )
         )
         self.layers[0].key = 0
@@ -792,7 +830,9 @@ class NeuralNetwork:
 
     # layer class (inner class of the NeuralNetwork class)
     class layer:
-        def __init__(self, name=None, nodes=None, units=None, special=None):
+        def __init__(
+            self, name=None, nodes=None, units=None, special=None, activation=None
+        ):
             if nodes is None and units is None:
                 assert (
                     False
@@ -806,6 +846,32 @@ class NeuralNetwork:
 
             self.name = name
 
+            if activation is None:
+                warnings.warn(
+                    f"The activation function for the layer {self.name} is not given.\nUsing sigmoid activation instead."
+                )
+                activation = sigmoid
+
+            if activation in [sigmoid, ReLU, LeakyReLU, tanh]:
+                self.activationVar = activation
+                if activation == sigmoid:
+                    self.activation = self.Sigmoid
+                    self.dactivation = self.dSigmoid
+                elif activation == ReLU:
+                    self.activation = self.reLU
+                    self.dactivation = self.dreLU
+                elif activation == LeakyReLU:
+                    self.activation = self.leakyReLU
+                    self.dactivation = self.dleakyReLU
+                elif activation == tanh:
+                    self.activation = self.Tanh
+                    self.dactivation = self.dTanh
+
+            else:
+                assert (
+                    False
+                ), f"\n\nInvalid activation function given.\nReceived {activation}"
+
             if special == "InPuT_0":
                 self.type = "INPUT"
             elif special == "OuTpUt_last":
@@ -816,6 +882,38 @@ class NeuralNetwork:
             self.weights = None
             self.bias = None
             self.key = None
+
+        # These functions cannot be private as they cannot be called by the matrix library.
+        # the Activation functions of the network
+        def Sigmoid(self, x):
+            return np.float128(1) / (np.float128(1) + np.exp(np.float128(-x)))
+
+        def dSigmoid(self, y):
+            return np.float128(y) * (np.float128(1) - np.float128(y))
+
+        def reLU(self, x):
+            return np.float128(x) * np.float128(x > 0)
+
+        def dreLU(self, x):
+            return np.float128(1.0) * np.float128(x > 0)
+
+        def leakyReLU(self, x):
+            y1 = np.float128(x > 0) * np.float128(x)
+            y2 = np.float128(x <= 0) * np.float128(x) * np.float128(0.01)
+            return np.float128(y1) + np.float128(y2)
+
+        def dleakyReLU(self, y):
+            y1 = np.float128(y >= 0)
+            y2 = np.float128(y < 0) * np.float128(0.01)
+            return np.float128(y1) + np.float128(y2)
+
+        def Tanh(self, z):
+            return (np.exp(np.float128(z)) - np.exp(np.float128(-z))) / (
+                np.exp(np.float128(z)) + np.exp(np.float128(-z))
+            )
+
+        def dTanh(self, y):
+            return np.float128(1) - np.float128(y) * np.float128(y)
 
         # inbuilt method to print the layer
         # print(layer) will give these results
@@ -851,7 +949,12 @@ class matrix:
         if wait:
             self.data = []
         else:
-            self.data = np.random.uniform(-1, 1, (self.rows, self.cols))
+            np.random.uniform2 = lambda *args, dtype=np.float64: np.random.uniform(
+                *args
+            ).astype(dtype)
+            self.data = np.random.uniform2(
+                -1, 1, (self.rows, self.cols), dtype=np.float128
+            )
 
     def __str__(self):
         print("\n")
@@ -875,7 +978,7 @@ class matrix:
             ), "Invalid Matrix Provided"
             self.data = np.multiply(self.data, n.data)
         elif isinstance(n, numbers.Number):
-            self.data = self.data * n
+            self.data = self.data * np.float128(n)
 
     @staticmethod
     def multiply(m1, m2):
@@ -930,7 +1033,7 @@ class matrix:
             assert n.rows == self.rows and n.cols == self.cols, "Invalid Parameters"
             self.data = self.data + n.data
         else:
-            self.data = self.data + n
+            self.data = self.data + np.float128(n)
 
     @staticmethod
     def transpose(m):
