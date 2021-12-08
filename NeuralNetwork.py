@@ -407,6 +407,61 @@ class NeuralNetwork:
                 if self.task == "Classification":
                     self.labels = l["labels"]
 
+    @staticmethod
+    def fromFile(filename):
+        filenameSplit = filename.split(".")
+        assert (
+            filenameSplit[len(filenameSplit) - 1] == "json"
+        ), "\n\nInvalid loading file format.\nCan load only JSON files.\n"
+        del filenameSplit
+        with open(filename, "r", encoding="utf-8") as file:
+            try:
+                data = json.load(file)
+            except:
+                assert False, "\n\nThere was an error loading the file...\n"
+            file.close()
+        assert isinstance(
+            data, list
+        ), "\n\nThe data loaded from the file is not of required format."
+        if "labels" in data[0]:
+            myTask = "Classification"
+            n_inputs = data[0]["Config_Info"]["layer_nodes"][0]
+            n_labels = len(data[0]["labels"])
+            nn = NeuralNetwork(inputs=n_inputs, labels=n_labels, task=myTask)
+        else:
+            myTask = "Regression"
+            n_inputs = data[0]["Config_Info"]["layer_nodes"][0]
+            n_outputs = data[0]["Config_Info"]["layer_nodes"][
+                data[0]["Config_Info"]["layers"] - 1
+            ]
+            nn = NeuralNetwork(inputs=n_inputs, labels=n_outputs, task=myTask)
+        for i in range(1, data[0]["Config_Info"]["layers"] - 1):
+            try:
+                layer = NeuralNetwork.layer(
+                    name=data[0]["Config_Info"]["layer_names"][i],
+                    nodes=data[0]["Config_Info"]["layer_nodes"][i],
+                    activation=data[i + 1]["activation"],
+                )
+            except:
+                warnings.warn(
+                    "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
+                )
+                layer = NeuralNetwork.layer(
+                    name=data[0]["Config_Info"]["layer_names"][i],
+                    nodes=data[0]["Config_Info"]["layer_nodes"][i],
+                    activation=sigmoid,
+                )
+            nn.addLayer(layer)
+        try:
+            nn.compileModel(activation=data[len(data) - 1]["activation"])
+        except:
+            warnings.warn(
+                "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
+            )
+            nn.compileModel(activation=sigmoid)
+        nn.load(filename)
+        return nn
+
     def mapLR(self, x):
         return np.float128(np.float128(x) * np.float128(self.learning_rate))
 
