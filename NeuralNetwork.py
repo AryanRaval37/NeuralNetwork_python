@@ -8,8 +8,10 @@ import json
 import warnings
 import numpy as np
 import copy
+from scipy.special import expit
 
-# TODO : Implement Softmax. More information about implementation in oneNote.
+# ! ALERT : Activation function: LeakyReLU and tanh are not in yet in an evolved state
+# ! They may result to overflow error and stop of the gradient descent algorithm.
 
 sigmoid = "-=-=-=-=-"
 tanh = "-=-=-=-=-=-"
@@ -173,19 +175,20 @@ class NeuralNetwork:
             self.addTestingData(d["input"], d["label"])
 
     @staticmethod
-    def myRunTest(nn, testing, q):
+    def myRunTest(nn, testing, applySoftmax, q):
         correct = 0
         for data in testing:
             inputs = data["input"]
             label = data["label"]
-            classification = nn.classify(inputs)
-            dataClass = classification["class"]
+            classification = nn.classify(inputs, applySoftmax)
+            # dataClass = classification["class"]
+            dataClass = classification[0]["class"]
             if dataClass == label:
                 correct += 1
         q.put(correct)
 
     # method to run tests using testing data
-    def runTest(self):
+    def runTest(self, applySoftmax=True):
         assert (
             self.task == "Classification"
         ), "\nTests can be run only for the task Classification.\n"
@@ -196,7 +199,9 @@ class NeuralNetwork:
         testing = [list(x) for x in testing]
         q = Queue()
         for i in range(5):
-            processes.append(Process(target=self.myRunTest, args=[self, testing[i], q]))
+            processes.append(
+                Process(target=self.myRunTest, args=[self, testing[i], applySoftmax, q])
+            )
         for process in processes:
             process.start()
         for process in processes:
@@ -225,11 +230,7 @@ class NeuralNetwork:
         outputs = matrix.multiply(self.layers[index_l2].weights, inputs)
         # adding the layers bias
         outputs.add(self.layers[index_l2].bias)
-        # mapping it to a range between 0 and 1 by the sigmoid function
-        # outputs.map(self.sigmoid)
-        # CHECK THIS FOR THE INPUT layer
-        # print(self.layers[index_l2].activation)
-        # print(self.Sigmoid)
+        # Using the activation function
         outputs.map(self.layers[index_l2].activation)
         # returning the outputs
         return outputs
@@ -654,8 +655,6 @@ class NeuralNetwork:
             args=[self, queue, epochs, plotInterval, lossQueue, debug],
         )
         trainingProcess.daemon = False
-        # time.sleep(1)
-        # print("Start training")
         trainingProcess.start()
         while trainingProcess.is_alive():
             if everyEpoch:
@@ -672,76 +671,6 @@ class NeuralNetwork:
 
     # Cost / Loss function :
     #   C = 1/2 * (Guess - Desired)^2
-
-    def trainData(self, input_array, target_array):
-        assert isinstance(
-            input_array, list
-        ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
-        assert (
-            len(input_array) == self.inputNodes
-        ), "\n\nThe number of inputs provided to train are not matching\nto the number of inputNodes mentioned before."
-        assert (
-            len(target_array) == self.outputNodes
-        ), "\n\nThe number of targets provided to the train function are not matching\nto the number of outputs mentioned before."
-        assert (
-            self.compiled
-        ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
-        assert self.isTraining == False, "\n\nThe model is already training."
-
-        self.isTraining = True
-
-        # adding the inputs to the input layer.
-        self.layers[0].inputList = input_array
-        # converting it to a matrix
-        self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
-
-        # producing outputs for the inputs with the first layer.
-        previousPrediction = self.predictLayer(1, self.layers[0].inputMatrix)
-
-        # innitially i has to be two as the outputs of the first layer with the 0 layer
-        # (input layer) are alrealy done.
-        i = 2
-        layerPredictions = []
-        layerPredictions.append(self.layers[0].inputMatrix)
-        layerPredictions.append(previousPrediction)
-        while i <= len(self.layers) - 1:
-            previousPrediction = self.predictLayer(i, previousPrediction)
-            layerPredictions.append(previousPrediction)
-            i += 1
-        outputs = previousPrediction
-
-        # converting target list to matrix.
-        targets = matrix.toMatrix(target_array)
-
-        # ERROR = DESIRED - GUESS
-        # Therefore first calculating guess and subtracting from target
-        output_errors = matrix.subtract(targets, outputs)
-        Errors = output_errors
-        i = len(self.layers) - 1
-        while i >= 1:
-            layer2 = self.layers[i]
-
-            # calculaing gradients between layer i and i-1
-            gradients = matrix.map_static(layerPredictions[i], self.dsigmoid)
-            gradients.simpleMultiply(Errors)
-            gradients.map(self.mapLR)
-
-            # calculating change in weights
-            l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
-            weights_l2l1_deltas = matrix.multiply(gradients, l1_predictions_transposed)
-
-            # changing the weights of layer i
-            layer2.weights.add(weights_l2l1_deltas)
-            layer2.bias.add(gradients)
-
-            # calculating the errors for the next layer for next iteration in loop
-            weights_l2l1_transposed = matrix.transpose(layer2.weights)
-            Errors = matrix.multiply(weights_l2l1_transposed, Errors)
-
-            # reassigning layer2 to the actualy layers
-            self.layers[i] = layer2
-            i -= 1
-        self.isTraining = False
 
     # public function the predict the outputs for given inputs
     def predict_Async(self, input_array, onComplete):
@@ -785,7 +714,7 @@ class NeuralNetwork:
         prediction = previousPrediction.toList()
         return prediction
 
-    def classify(self, input_array):
+    def classify(self, input_array, applySoftmax=True):
         # assert (
         #     len(self.labels) == self.outputNodes
         # ), "\n\nAll the labels have not yet been given.\nTo Classify, provide all the labels to the network."
@@ -819,16 +748,34 @@ class NeuralNetwork:
         while i <= len(self.layers) - 1:
             previousPrediction = self.predictLayer(i, previousPrediction)
             i += 1
+
         # converting the predictions to a list and then returning the list
-        prediction = previousPrediction.toList()
-        myMax = np.NINF
-        for num in prediction:
-            if num > myMax:
-                myMax = num
-        labelIndex = prediction.index(myMax)
-        if len(self.labels) > labelIndex:
-            Class = self.labels[labelIndex]
-            return {"class": Class, "confidence": myMax}
+        prediction = previousPrediction.justFlatten()
+
+        if applySoftmax:
+
+            def softmax(vector):
+                e = np.exp(vector)
+                return e / e.sum()
+
+            prediction = prediction * 10
+            prediction = softmax(prediction)
+
+        sortOrder = prediction.argsort()[::-1]
+        prediction = prediction[sortOrder]
+        newLabels = np.array(self.labels)
+        sortedLabels = newLabels[sortOrder]
+        del newLabels
+        del sortOrder
+        retArr = []
+        for pred in range(len(prediction)):
+            retArr.append(
+                {
+                    "class": sortedLabels[pred],
+                    "confidence": np.float64(prediction[pred]),
+                }
+            )
+        return retArr
 
     # private function to connect two layers:
     # Connecting = creating matrices of suitable length and initiallzing randomly
@@ -941,7 +888,14 @@ class NeuralNetwork:
         # These functions cannot be private as they cannot be called by the matrix library.
         # the Activation functions of the network
         def Sigmoid(self, x):
-            return np.float128(1) / (np.float128(1) + np.exp(np.float128(-x)))
+            # # return np.float128(1) / (np.float128(1) + np.exp(np.float128(-x)))
+            # x1 = (x >= 0) * np.float128(
+            #     1 / (1 + np.exp(np.float128(-x), dtype=np.float128))
+            # )
+            # expX = np.exp(x, dtype=np.float128)
+            # x2 = (x < 0) * np.float128(expX / (1 + expX))
+            # return x1 + x2
+            return expit(x, dtype=np.float128)
 
         def dSigmoid(self, y):
             return np.float128(y) * (np.float128(1) - np.float128(y))
@@ -963,9 +917,10 @@ class NeuralNetwork:
             return np.float128(y1) + np.float128(y2)
 
         def Tanh(self, z):
-            return (np.exp(np.float128(z)) - np.exp(np.float128(-z))) / (
-                np.exp(np.float128(z)) + np.exp(np.float128(-z))
-            )
+            # return (np.exp(np.float128(z)) - np.exp(np.float128(-z))) / (
+            #     np.exp(np.float128(z)) + np.exp(np.float128(-z))
+            # )
+            return np.tanh(z, dtype=np.float128)
 
         def dTanh(self, y):
             return np.float128(1) - np.float128(y) * np.float128(y)
@@ -1008,7 +963,7 @@ class matrix:
                 *args
             ).astype(dtype)
             self.data = np.random.uniform2(
-                -1, 1, (self.rows, self.cols), dtype=np.float128
+                -0.5, 0.5, (self.rows, self.cols), dtype=np.float128
             )
 
     def __str__(self):
@@ -1049,6 +1004,9 @@ class matrix:
 
     def toList(self):
         return self.data.flatten().tolist()
+
+    def justFlatten(self):
+        return self.data.flatten()
 
     def map(self, fn):
         self.data = fn(self.data)
