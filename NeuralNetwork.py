@@ -9,6 +9,7 @@ import warnings
 import numpy as np
 import copy
 from scipy.special import expit
+from tqdm import tqdm
 
 # ! ALERT : Activation function: LeakyReLU and tanh are not in yet in an evolved state
 # ! They may result to overflow error and stop of the gradient descent algorithm.
@@ -514,7 +515,9 @@ class NeuralNetwork:
         plt.show()
 
     @staticmethod
-    def trainNotToBeUsed(nn, queue, epochs, plot_interval, lossQueue, debug):
+    def trainNotToBeUsed(
+        nn, queue, epochs, plot_interval, lossQueue, debug, everyEpoch
+    ):
         epochLosses = []
         k = 1
         if debug:
@@ -530,12 +533,19 @@ class NeuralNetwork:
                 )
             plotingProcess.daemon = True
             plotingProcess.start()
-        for epochCounter in range(epochs):
+
+        if not everyEpoch:
+            myRange1 = tqdm(range(epochs))
+            myRange2 = range(len(nn.data))
+        else:
+            myRange1 = range(epochs)
+            myRange2 = tqdm(range(len(nn.data)))
+        for epochCounter in myRange1:
             random.shuffle(nn.data)
             # training an epoch
             epochLosses = []
             z = 1
-            for d in range(len(nn.data)):
+            for d in myRange2:
                 input_array = nn.data[d]["input"]
                 target_array = nn.data[d]["target"]
                 # adding the inputs to the input layer.
@@ -652,7 +662,7 @@ class NeuralNetwork:
         lossQueue = Queue()
         trainingProcess = Process(
             target=self.__class__.trainNotToBeUsed,
-            args=[self, queue, epochs, plotInterval, lossQueue, debug],
+            args=[self, queue, epochs, plotInterval, lossQueue, debug, everyEpoch],
         )
         trainingProcess.daemon = False
         trainingProcess.start()
