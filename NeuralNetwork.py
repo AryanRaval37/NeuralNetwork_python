@@ -1,6 +1,15 @@
+
+# >      ███╗   ██╗███████╗██╗   ██╗██████╗  █████╗ ██╗         ███╗   ██╗███████╗████████╗██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗
+# >     ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔══██╗██║         ████╗  ██║██╔════╝╚══██╔══╝██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝
+# >    ██╔██╗ ██║█████╗  ██║   ██║██████╔╝███████║██║         ██╔██╗ ██║█████╗     ██║   ██║ █╗ ██║██║   ██║██████╔╝█████╔╝ 
+# >   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██╔══██║██║         ██║╚██╗██║██╔══╝     ██║   ██║███╗██║██║   ██║██╔══██╗██╔═██╗ 
+# >  ██║ ╚████║███████╗╚██████╔╝██║  ██║██║  ██║███████╗    ██║ ╚████║███████╗   ██║   ╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗
+# > ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝    ╚═╝  ╚═══╝╚══════╝   ╚═╝    ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+                                                                                                                     
 import numbers
 import random
 import concurrent.futures
+import multiprocessing as mp
 from multiprocessing import Queue, Process
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -8,22 +17,24 @@ import json
 import warnings
 import numpy as np
 import copy
-import time
+from scipy.special import expit
+from tqdm import tqdm
 
-# NOW THE LIBRARY IS POWERED BY NUMPY
-# atleast 25 times faster than previous version.
-# numpy support in matrices.
-# removed extra matrix file.
+# Working version: Somehow plotting got broken in the last version
+# python 3.13
 
-# DO's:
-# take execution to GPU. ------ Not Possible...
-# implement more numpy as smallest of calculations and arrays. ------ will Do
-# use mpmath for more precision while calculating numbers and matrices. ----- will slow down but thinkable
-# Test more on Regression and remove small bugs. ------ sure do this...
+# ! ALERT : Activation function: LeakyReLU and tanh are not in yet in an evolved state
+# ! They may result to overflow error and stop of the gradient descent algorithm.
 
-# DONT's:
-# Do not use mpmath.matrix directly. ------- NEVER EVER
-# Will suffer slower execution than the old, slow looping matrix library.
+# todo: It is stupid to have all numerical operations happen in float128
+# it makes no difference to performance and should be switched to float32 try
+# float16 if it makes tangible difference to speed
+
+# todo: Uncessary and stupid way to do it, maybe consider changing it
+sigmoid = "-=-=-=-=-"
+tanh = "-=-=-=-=-=-"
+ReLU = "-=-=-=-=-=-=-"
+LeakyReLU = "-=-=-=-=-=-=-=-"
 
 
 class NeuralNetwork:
@@ -91,23 +102,19 @@ class NeuralNetwork:
         self.testingData = []
         # adding the input layer to the network the moment it is created.
         self.layers.append(
-            self.layer(name="Input_Layer", nodes=self.inputNodes, special="InPuT_0")
+            self.layer(
+                name="Input_Layer",
+                nodes=self.inputNodes,
+                special="InPuT_0",
+                activation=sigmoid,
+            )
         )
 
-        # learning rate of the network
+        # learning rate of the networks
         self.learning_rate = 0.1
         # boolean to check if the model is training
         self.isTraining = False
         warnings.simplefilter("default")
-
-    # These functions cannot be private as they cannot be called by the matrix library.
-    # the Activation function of the network
-    def sigmoid(self, x):
-        return 1 / (1 + np.exp(-x))
-
-    # derivative of Sigmoid function       |*_*| CALCULUS |*_*|
-    def dsigmoid(self, y):
-        return y * (1 - y)
 
     # function to add training data to the network
     def addTrainingData(self, input_array, output):
@@ -186,30 +193,33 @@ class NeuralNetwork:
             self.addTestingData(d["input"], d["label"])
 
     @staticmethod
-    def myRunTest(nn, testing, q):
+    def myRunTest(nn, testing, applySoftmax, q):
         correct = 0
         for data in testing:
             inputs = data["input"]
             label = data["label"]
-            classification = nn.classify(inputs)
-            dataClass = classification["class"]
+            classification = nn.classify(inputs, applySoftmax)
+            # dataClass = classification["class"]
+            dataClass = classification[0]["class"]
             if dataClass == label:
                 correct += 1
         q.put(correct)
 
     # method to run tests using testing data
-    def runTest(self):
+    def runTest(self, applySoftmax=True, parallel=5):
         assert (
             self.task == "Classification"
         ), "\nTests can be run only for the task Classification.\n"
         if len(self.testingData) == 0:
             return
         processes = []
-        testing = np.array_split(self.testingData, 5)
+        testing = np.array_split(self.testingData, parallel)
         testing = [list(x) for x in testing]
         q = Queue()
         for i in range(5):
-            processes.append(Process(target=self.myRunTest, args=[self, testing[i], q]))
+            processes.append(
+                Process(target=self.myRunTest, args=[self, testing[i], applySoftmax, q])
+            )
         for process in processes:
             process.start()
         for process in processes:
@@ -238,13 +248,31 @@ class NeuralNetwork:
         outputs = matrix.multiply(self.layers[index_l2].weights, inputs)
         # adding the layers bias
         outputs.add(self.layers[index_l2].bias)
-        # mapping it to a range between 0 and 1 by the sigmoid function
-        outputs.map(self.sigmoid)
+        # Using the activation function
+        outputs.map(self.layers[index_l2].activation)
         # returning the outputs
         return outputs
 
+    def __activationVarToStr(self, l):
+        var = l.activationVar
+        if var == sigmoid:
+            if l.type == "INPUT":
+                string = "None"
+            else:
+                string = "sigmoid"
+        elif var == tanh:
+            string = "tanh"
+        elif var == LeakyReLU:
+            string = "leakyReLU"
+        elif var == ReLU:
+            string = "reLU"
+        return string
+
     # function to save a compiled model
-    def save(self, filename, infoName=""):
+    # ! Warning:
+    # ! This function will round off weights to float64 and then save.
+    # ! So after loading the predictions by the model may not be the same.
+    def save(self, filename, infoName=None, moreInfo={}):
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet so it cannot be saved.\n"
@@ -256,15 +284,16 @@ class NeuralNetwork:
         for i in range(len(self.layers)):
             l = copy.deepcopy(self.layers[i])
             if l.weights is not None:
-                l.weights.data = l.weights.data.tolist()
+                l.weights.data = l.weights.data.astype("float64").tolist()
             if l.bias is not None:
-                l.bias.data = l.bias.data.tolist()
+                l.bias.data = l.bias.data.astype("float64").tolist()
             mylayers.append(
                 {
                     "nodes": l.nodes,
                     "name": l.name,
                     "type": l.type,
                     "key": l.key,
+                    "activation": l.activationVar,
                     "weights": l.weights.__dict__ if l.weights is not None else None,
                     "bias": l.bias.__dict__ if l.bias is not None else None,
                 }
@@ -274,11 +303,15 @@ class NeuralNetwork:
                 0,
                 {
                     "Contents": "NeuralNetwork Model",
-                    "Info_Name": infoName if infoName != "" else "Untitiled",
+                    "Info_Name": infoName if infoName is not None else "Untitiled",
+                    "MoreInfo": moreInfo,
                     "Config_Info": {
                         "layers": len(self.layers),
                         "layer_nodes": [l.nodes for l in self.layers],
                         "layer_names": [l.name for l in self.layers],
+                        "Activation_functions": [
+                            self.__activationVarToStr(l) for l in self.layers
+                        ],
                     },
                 },
             )
@@ -292,6 +325,9 @@ class NeuralNetwork:
                         "layers": len(self.layers),
                         "layer_nodes": [l.nodes for l in self.layers],
                         "layer_names": [l.name for l in self.layers],
+                        "Activation_functions": [
+                            self.__activationVarToStr(l) for l in self.layers
+                        ],
                     },
                     "labels": self.labels,
                 },
@@ -357,7 +393,14 @@ class NeuralNetwork:
             ), f"\n\nThe number of nodes of layer {i} in the data, is not equal to the number of nodes of layer {i} in the network.\nWrong configuration of data loaded from file.\nError loading the model."
         for l in data:
             if not ("Contents" in l.keys()):
-                myLayer = self.layer(nodes=l["nodes"], name=l["name"])
+                if "activation" in l.keys():
+                    myLayer = self.layer(
+                        nodes=l["nodes"], name=l["name"], activation=l["activation"]
+                    )
+                else:
+                    myLayer = self.layer(
+                        nodes=l["nodes"], name=l["name"], activation=sigmoid
+                    )
                 myLayer.type = l["type"]
                 myLayer.key = l["key"]
 
@@ -368,21 +411,78 @@ class NeuralNetwork:
                         name=l["weights"]["name"],
                         wait=True,
                     )
-                    myLayer.weights.data = np.array(l["weights"]["data"])
+                    myLayer.weights.data = np.array(
+                        l["weights"]["data"], dtype=np.float128
+                    )
                     myLayer.bias = matrix(
                         rows=l["bias"]["rows"],
                         cols=l["bias"]["cols"],
                         name=l["bias"]["name"],
                         wait=True,
                     )
-                    myLayer.bias.data = np.array(l["bias"]["data"])
+                    myLayer.bias.data = np.array(l["bias"]["data"], dtype=np.float128)
                 self.layers[myLayer.key] = myLayer
             else:
                 if self.task == "Classification":
                     self.labels = l["labels"]
 
+    @staticmethod
+    def fromFile(filename):
+        filenameSplit = filename.split(".")
+        assert (
+            filenameSplit[len(filenameSplit) - 1] == "json"
+        ), "\n\nInvalid loading file format.\nCan load only JSON files.\n"
+        del filenameSplit
+        with open(filename, "r", encoding="utf-8") as file:
+            try:
+                data = json.load(file)
+            except:
+                assert False, "\n\nThere was an error loading the file...\n"
+            file.close()
+        assert isinstance(
+            data, list
+        ), "\n\nThe data loaded from the file is not of required format."
+        if "labels" in data[0]:
+            myTask = "Classification"
+            n_inputs = data[0]["Config_Info"]["layer_nodes"][0]
+            n_labels = len(data[0]["labels"])
+            nn = NeuralNetwork(inputs=n_inputs, labels=n_labels, task=myTask)
+        else:
+            myTask = "Regression"
+            n_inputs = data[0]["Config_Info"]["layer_nodes"][0]
+            n_outputs = data[0]["Config_Info"]["layer_nodes"][
+                data[0]["Config_Info"]["layers"] - 1
+            ]
+            nn = NeuralNetwork(inputs=n_inputs, labels=n_outputs, task=myTask)
+        for i in range(1, data[0]["Config_Info"]["layers"] - 1):
+            try:
+                layer = NeuralNetwork.layer(
+                    name=data[0]["Config_Info"]["layer_names"][i],
+                    nodes=data[0]["Config_Info"]["layer_nodes"][i],
+                    activation=data[i + 1]["activation"],
+                )
+            except:
+                warnings.warn(
+                    "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
+                )
+                layer = NeuralNetwork.layer(
+                    name=data[0]["Config_Info"]["layer_names"][i],
+                    nodes=data[0]["Config_Info"]["layer_nodes"][i],
+                    activation=sigmoid,
+                )
+            nn.addLayer(layer)
+        try:
+            nn.compileModel(activation=data[len(data) - 1]["activation"])
+        except:
+            warnings.warn(
+                "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
+            )
+            nn.compileModel(activation=sigmoid)
+        nn.load(filename)
+        return nn
+
     def mapLR(self, x):
-        return x * self.learning_rate
+        return np.float128(np.float128(x) * np.float128(self.learning_rate))
 
     # function to change the learning rate of the network.
     def setLearningRate(self, lr):
@@ -390,18 +490,21 @@ class NeuralNetwork:
             lr, numbers.Number
         ), "\nThe learning rate given is not a number."
         assert lr > 0 and lr <= 2.5, "\nInvalid learning rate given."
-        self.learning_rate = lr
+        self.learning_rate = np.float128(lr)
 
     def mapLoss(self, x):
-        return x * x / 2
+        return np.float128(x) * np.float128(x) / np.float128(2)
 
     @staticmethod
     def myLossPlotter(queue, endQueue, plottingType):
+        # Setting up plot
         anim = None
         xdata = []
         ydata = []
+        plt.style.use('fast')
         fig, ax = plt.subplots()
-        (In,) = plt.plot([], [])
+        line, = plt.plot([], [], lw=2, color="green")
+        ax.grid()
 
         def init():
             ax.set_title("Training Process")
@@ -410,58 +513,102 @@ class NeuralNetwork:
             else:
                 ax.set_xlabel("Epochs")
             ax.set_ylabel("Loss / Cost")
-            return (In,)
+            line.set_data(xdata, ydata)
+            return (line,)
 
-        def animate(i):
-            while not queue.empty():
-                queueData = queue.get_nowait()
-                xdata.append(queueData[1])
-                ydata.append(queueData[0])
-            ax.cla()
+        # Function to get data from the queue
+        def getData():
+            while True:
+                incomingData = []
+                while not queue.empty():
+                    queueData = queue.get_nowait()
+                    incomingData.append((queueData[1], queueData[0]))
+                yield incomingData
+
+        def animate(incomingData):
             init()
-            ax.plot(xdata, ydata, linewidth=2, color="green")
+            for data in incomingData:
+                xdata.append(data[0])
+                ydata.append(data[1])
+            if len(xdata) == 0 or len(ydata) == 0:
+                return (line,)
+            
+            line.set_data(xdata, ydata)
+            ax.set_yscale('log')
+            ax.relim()
+            ax.autoscale_view()
+
+            # Remove previous annotations and extra lines if they exist
+            if hasattr(animate, 'min_point'):
+                animate.min_point.remove()
+            if hasattr(animate, 'min_text'):
+                animate.min_text.remove()
+            if hasattr(animate, 'ma_line'):
+                animate.ma_line.remove()
+
+            # Highlight the best (minimum loss) point
+            if ydata:
+                min_idx = ydata.index(min(ydata))
+                animate.min_point = ax.scatter([xdata[min_idx]], [ydata[min_idx]], color='red', zorder=5, label='Best')
+                # Show min and current loss as text
+                animate.min_text = ax.text(
+                    0.98, 0.98,
+                    f"Min: {min(ydata):.4g}\nNow: {ydata[-1]:.4g}",
+                    transform=ax.transAxes,
+                    fontsize=10,
+                    verticalalignment='top',
+                    horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7)
+                )
+                # Plot moving average
+                window = 50
+                if len(ydata) >= window:
+                    ma = np.convolve(ydata, np.ones(window)/window, mode='valid')
+                    animate.ma_line, = ax.plot(xdata[window-1:], ma, color='blue', linestyle='--', label='Moving Avg')
+                else:
+                    animate.ma_line, = ax.plot([], [], color='blue', linestyle='--', label='Moving Avg')
+
             if not endQueue.empty():
                 shouldplot = endQueue.get()
                 if not shouldplot:
                     anim.event_source.stop()
-            return (In,)
+            return (line,)
 
-        anim = FuncAnimation(fig, animate, init_func=init, blit=True, interval=2)
-        plt.style.use("fivethirtyeight")
-        fig.set_size_inches(10, 7)
-        plt.show()
+        anim = FuncAnimation(fig, animate, getData, init_func=init, interval=20, save_count=1000)
+        plt.show(block=True)
 
     @staticmethod
-    def trainNotToBeUsed(nn, queue, epochs, plot_interval, lossQueue, debug):
+    def trainNotToBeUsed(
+        nn, queue, epochs, plot_interval, lossQueue, debug, everyEpoch, plotQueue, endQueue
+    ):
+        if plt.get_backend() == "MacOSX":
+            mp.set_start_method("forkserver", force=True)
+
         epochLosses = []
         k = 1
-        if debug:
-            queue1 = Queue()
-            endQueue = Queue()
-            if plot_interval < 1:
-                plotingProcess = Process(
-                    target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue, "Data"]
-                )
-            else:
-                plotingProcess = Process(
-                    target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue, "N"]
-                )
-            plotingProcess.daemon = True
-            plotingProcess.start()
-        for epochCounter in range(epochs):
+
+        if not everyEpoch:
+            myRange1 = tqdm(range(epochs))
+            myRange2 = range(len(nn.data))
+        else:
+            myRange1 = range(epochs)
+            myRange2 = tqdm(range(len(nn.data)))
+
+        for epochCounter in myRange1:
             random.shuffle(nn.data)
-            # training an epoch
+            # trainin an epoch
             epochLosses = []
             z = 1
-            for d in range(len(nn.data)):
+            for d in myRange2:
                 input_array = nn.data[d]["input"]
                 target_array = nn.data[d]["target"]
-                # adding the inputs to the input layer.
+
+                # adding the inputs to the input layer
                 nn.layers[0].inputList = input_array
-                # converting it to a matrix
+                # converting the input list to a matrix
                 nn.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
 
-                # producing outputs for the inputs with the first layer.
+                # predicting the outputs of the first layer
                 previousPrediction = nn.predictLayer(1, nn.layers[0].inputMatrix)
 
                 # innitially i has to be two as the outputs of the first layer with the 0 layer
@@ -476,67 +623,49 @@ class NeuralNetwork:
                     i += 1
                 outputs = previousPrediction
 
-                # converting target list to matrix.
                 targets = matrix.toMatrix(target_array)
-
                 # ERROR = DESIRED - GUESS
                 # Therefore first calculating guess and subtracting from target
                 output_errors = matrix.subtract(targets, outputs)
-
                 costMatrix = matrix.map_static(output_errors, nn.mapLoss)
                 loss = costMatrix.mean()
-                epochLosses.append(loss)
+                epochLosses.append(np.float32(loss))
                 if plot_interval == 0 and debug:
-                    queue1.put([loss, epochCounter * len(nn.data) + d + 1])
-
+                    plotQueue.put([loss, epochCounter * len(nn.data) + d + 1])
                 Errors = output_errors
                 i = len(nn.layers) - 1
                 while i >= 1:
                     layer2 = nn.layers[i]
-
-                    # calculaing gradients between layer i and i-1
-                    gradients = matrix.map_static(layerPredictions[i], nn.dsigmoid)
+                    gradients = matrix.map_static(
+                        layerPredictions[i], layer2.dactivation
+                    )
                     gradients.simpleMultiply(Errors)
                     gradients.map(nn.mapLR)
-
-                    # calculating change in weights
                     l1_predictions_transposed = matrix.transpose(
                         layerPredictions[i - 1]
                     )
                     weights_l2l1_deltas = matrix.multiply(
                         gradients, l1_predictions_transposed
                     )
-
-                    # changing the weights of layer i
                     layer2.weights.add(weights_l2l1_deltas)
                     layer2.bias.add(gradients)
-
-                    # calculating the errors for the next layer for next iteration in loop
                     weights_l2l1_transposed = matrix.transpose(layer2.weights)
                     Errors = matrix.multiply(weights_l2l1_transposed, Errors)
-
-                    # reassigning layer2 to the actualy layers
                     nn.layers[i] = layer2
                     i -= 1
-                # End of Backpropogation
                 if debug and plot_interval > 0 and plot_interval < 1:
                     if d + 1 >= int(plot_interval * len(nn.data)) * z:
-                        # should plot
-                        queue1.put([loss, epochCounter * len(nn.data) + d + 1])
+                        plotQueue.put([loss, epochCounter * len(nn.data) + d + 1])
                         z += 1
-            # End of going through all data (End of an EPOCH)
             sum = 0
             for i in range(len(epochLosses)):
                 sum += epochLosses[i]
             meanLoss = sum / len(epochLosses)
             if debug and plot_interval >= 1:
                 if epochCounter + 1 >= plot_interval * k:
-                    # checking if it is time to plot
-                    queue1.put([meanLoss, epochCounter + 1])
+                    plotQueue.put([meanLoss, epochCounter + 1])
                     k += 1
-            # passing this to whileDoing function from main function call
             lossQueue.put([epochCounter + 1, meanLoss])
-        # End of going through all the epochs (Training complete)
         changedWeights = [0]
         for i in range(1, len(nn.layers)):
             changedWeights.append(nn.layers[i])
@@ -544,16 +673,24 @@ class NeuralNetwork:
         lossQueue.put(False)
         if debug:
             endQueue.put(False)
-            plotingProcess.join()
+                     
+
+#*    ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ 
+#*   ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝ 
+#*     ██║   ██████╔╝███████║██║██╔██╗ ██║██║██╔██╗ ██║██║  ███╗
+#*    ██║   ██╔══██╗██╔══██║██║██║╚██╗██║██║██║╚██╗██║██║   ██║
+#*   ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
+#*  ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
 
     def train(
         self,
-        whileTraining,
         epochs,
         plotInterval=5,
+        whileTraining=None,
         debug=True,
         everyEpoch=False,
     ):
+
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
@@ -563,17 +700,44 @@ class NeuralNetwork:
         ), "\n\nThe plot interval is less than the number of epochs.\n"
 
         self.isTraining = True
-        queue = Queue()
-        lossQueue = Queue()
+
+        manager = mp.Manager()
+        # Used to send the updated network layers (weights/biases) from the training process 
+        # back to the main process after training is complete.
+        queue = manager.Queue()
+        # Used to send loss and epoch information from the training process to the main 
+        # process, so the main process can call the whileTraining callback with the latest loss/epoch.
+        lossQueue = manager.Queue()
+        # Used to send loss data from the training process to the plotting process 
+        # for real-time visualization.
+        plotQueue = manager.Queue()
+        # Used to signal the plotting process to stop when training is finished
+        endQueue = manager.Queue()
+
+        # Start plotting process if debug
+        if debug:
+            plotProcess = Process(
+                target=NeuralNetwork.myLossPlotter,
+                args=[plotQueue, endQueue, "N" if plotInterval >= 1 else "Data"]
+            )
+            # If true, the the ploting process will end if the main process ends.
+            plotProcess.daemon = False
+            plotProcess.start()
+        else:
+            plotProcess = None
+
+        # Start training process
         trainingProcess = Process(
             target=self.__class__.trainNotToBeUsed,
-            args=[self, queue, epochs, plotInterval, lossQueue, debug],
+            args=[self, queue, epochs, plotInterval, lossQueue, debug, everyEpoch, plotQueue, endQueue],
         )
-        trainingProcess.daemon = False
-        # time.sleep(1)
-        # print("Start training")
+        # True so that the training stops if the main process ends.
+        trainingProcess.daemon = True
         trainingProcess.start()
+
         while trainingProcess.is_alive():
+            if whileTraining is None:
+                continue
             if everyEpoch:
                 EpochInfo = lossQueue.get()
                 if not EpochInfo:
@@ -586,78 +750,11 @@ class NeuralNetwork:
             self.layers[i] = updatedLayers[i]
         self.isTraining = False
 
+        # Wait for plot process to finish
+        if debug and plotProcess is not None:
+            plotProcess.join()
     # Cost / Loss function :
     #   C = 1/2 * (Guess - Desired)^2
-
-    def trainData(self, input_array, target_array):
-        assert isinstance(
-            input_array, list
-        ), f"\nThe input to predict funtion is not a list.\nReceived {type(input_array)}.\n"
-        assert (
-            len(input_array) == self.inputNodes
-        ), "\n\nThe number of inputs provided to train are not matching\nto the number of inputNodes mentioned before."
-        assert (
-            len(target_array) == self.outputNodes
-        ), "\n\nThe number of targets provided to the train function are not matching\nto the number of outputs mentioned before."
-        assert (
-            self.compiled
-        ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
-        assert self.isTraining == False, "\n\nThe model is already training."
-
-        self.isTraining = True
-
-        # adding the inputs to the input layer.
-        self.layers[0].inputList = input_array
-        # converting it to a matrix
-        self.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
-
-        # producing outputs for the inputs with the first layer.
-        previousPrediction = self.predictLayer(1, self.layers[0].inputMatrix)
-
-        # innitially i has to be two as the outputs of the first layer with the 0 layer
-        # (input layer) are alrealy done.
-        i = 2
-        layerPredictions = []
-        layerPredictions.append(self.layers[0].inputMatrix)
-        layerPredictions.append(previousPrediction)
-        while i <= len(self.layers) - 1:
-            previousPrediction = self.predictLayer(i, previousPrediction)
-            layerPredictions.append(previousPrediction)
-            i += 1
-        outputs = previousPrediction
-
-        # converting target list to matrix.
-        targets = matrix.toMatrix(target_array)
-
-        # ERROR = DESIRED - GUESS
-        # Therefore first calculating guess and subtracting from target
-        output_errors = matrix.subtract(targets, outputs)
-        Errors = output_errors
-        i = len(self.layers) - 1
-        while i >= 1:
-            layer2 = self.layers[i]
-
-            # calculaing gradients between layer i and i-1
-            gradients = matrix.map_static(layerPredictions[i], self.dsigmoid)
-            gradients.simpleMultiply(Errors)
-            gradients.map(self.mapLR)
-
-            # calculating change in weights
-            l1_predictions_transposed = matrix.transpose(layerPredictions[i - 1])
-            weights_l2l1_deltas = matrix.multiply(gradients, l1_predictions_transposed)
-
-            # changing the weights of layer i
-            layer2.weights.add(weights_l2l1_deltas)
-            layer2.bias.add(gradients)
-
-            # calculating the errors for the next layer for next iteration in loop
-            weights_l2l1_transposed = matrix.transpose(layer2.weights)
-            Errors = matrix.multiply(weights_l2l1_transposed, Errors)
-
-            # reassigning layer2 to the actualy layers
-            self.layers[i] = layer2
-            i -= 1
-        self.isTraining = False
 
     # public function the predict the outputs for given inputs
     def predict_Async(self, input_array, onComplete):
@@ -701,7 +798,7 @@ class NeuralNetwork:
         prediction = previousPrediction.toList()
         return prediction
 
-    def classify(self, input_array):
+    def classify(self, input_array, applySoftmax=True):
         # assert (
         #     len(self.labels) == self.outputNodes
         # ), "\n\nAll the labels have not yet been given.\nTo Classify, provide all the labels to the network."
@@ -735,16 +832,34 @@ class NeuralNetwork:
         while i <= len(self.layers) - 1:
             previousPrediction = self.predictLayer(i, previousPrediction)
             i += 1
+
         # converting the predictions to a list and then returning the list
-        prediction = previousPrediction.toList()
-        myMax = np.NINF
-        for num in prediction:
-            if num > myMax:
-                myMax = num
-        labelIndex = prediction.index(myMax)
-        if len(self.labels) > labelIndex:
-            Class = self.labels[labelIndex]
-            return {"class": Class, "confidence": myMax}
+        prediction = previousPrediction.justFlatten()
+
+        if applySoftmax:
+
+            def softmax(vector):
+                e = np.exp(vector)
+                return e / e.sum()
+
+            prediction = prediction * 10
+            prediction = softmax(prediction)
+
+        sortOrder = prediction.argsort()[::-1]
+        prediction = prediction[sortOrder]
+        newLabels = np.array(self.labels)
+        sortedLabels = newLabels[sortOrder]
+        del newLabels
+        del sortOrder
+        retArr = []
+        for pred in range(len(prediction)):
+            retArr.append(
+                {
+                    "class": sortedLabels[pred],
+                    "confidence": np.float64(prediction[pred]),
+                }
+            )
+        return retArr
 
     # private function to connect two layers:
     # Connecting = creating matrices of suitable length and initiallzing randomly
@@ -772,16 +887,25 @@ class NeuralNetwork:
 
     # function to add output layer at the end and finalize the model
     # Connecting the layers = Initiallizing random weights
-    def compileModel(self):
+    def compileModel(self, activation=None):
         assert (
             self.isTraining == False
         ), "\n\nThe model is training it cannot predict results."
         assert (
             self.compiled == False
         ), "\n\nThe model is already compiled.\n It cannot be recompiled."
+
+        if activation is None:
+            warnings.warn(
+                f"\n\nThe activation function was not given for the output layer.\nUsing Sigmoid activation."
+            )
+            activation = sigmoid
         self.layers.append(
             self.layer(
-                name="Output_Layer", nodes=self.outputNodes, special="OuTpUt_last"
+                name="Output_Layer",
+                nodes=self.outputNodes,
+                special="OuTpUt_last",
+                activation=activation,
             )
         )
         self.layers[0].key = 0
@@ -792,7 +916,9 @@ class NeuralNetwork:
 
     # layer class (inner class of the NeuralNetwork class)
     class layer:
-        def __init__(self, name=None, nodes=None, units=None, special=None):
+        def __init__(
+            self, name=None, nodes=None, units=None, special=None, activation=None
+        ):
             if nodes is None and units is None:
                 assert (
                     False
@@ -806,6 +932,32 @@ class NeuralNetwork:
 
             self.name = name
 
+            if activation is None:
+                warnings.warn(
+                    f"The activation function for the layer {self.name} is not given.\nUsing sigmoid activation instead."
+                )
+                activation = sigmoid
+
+            if activation in [sigmoid, ReLU, LeakyReLU, tanh]:
+                self.activationVar = activation
+                if activation == sigmoid:
+                    self.activation = self.Sigmoid
+                    self.dactivation = self.dSigmoid
+                elif activation == ReLU:
+                    self.activation = self.reLU
+                    self.dactivation = self.dreLU
+                elif activation == LeakyReLU:
+                    self.activation = self.leakyReLU
+                    self.dactivation = self.dleakyReLU
+                elif activation == tanh:
+                    self.activation = self.Tanh
+                    self.dactivation = self.dTanh
+
+            else:
+                assert (
+                    False
+                ), f"\n\nInvalid activation function given.\nReceived {activation}"
+
             if special == "InPuT_0":
                 self.type = "INPUT"
             elif special == "OuTpUt_last":
@@ -816,6 +968,46 @@ class NeuralNetwork:
             self.weights = None
             self.bias = None
             self.key = None
+
+        # These functions cannot be private as they cannot be called by the matrix library.
+        # the Activation functions of the network
+        def Sigmoid(self, x):
+            # # return np.float128(1) / (np.float128(1) + np.exp(np.float128(-x)))
+            # x1 = (x >= 0) * np.float128(
+            #     1 / (1 + np.exp(np.float128(-x), dtype=np.float128))
+            # )
+            # expX = np.exp(x, dtype=np.float128)
+            # x2 = (x < 0) * np.float128(expX / (1 + expX))
+            # return x1 + x2
+            return expit(x, dtype=np.float128)
+
+        def dSigmoid(self, y):
+            return np.float128(y) * (np.float128(1) - np.float128(y))
+
+        def reLU(self, x):
+            return np.float128(x) * np.float128(x > 0)
+
+        def dreLU(self, x):
+            return np.float128(1.0) * np.float128(x > 0)
+
+        def leakyReLU(self, x):
+            y1 = np.float128(x > 0) * np.float128(x)
+            y2 = np.float128(x <= 0) * np.float128(x) * np.float128(0.01)
+            return np.float128(y1) + np.float128(y2)
+
+        def dleakyReLU(self, y):
+            y1 = np.float128(y >= 0)
+            y2 = np.float128(y < 0) * np.float128(0.01)
+            return np.float128(y1) + np.float128(y2)
+
+        def Tanh(self, z):
+            # return (np.exp(np.float128(z)) - np.exp(np.float128(-z))) / (
+            #     np.exp(np.float128(z)) + np.exp(np.float128(-z))
+            # )
+            return np.tanh(z, dtype=np.float128)
+
+        def dTanh(self, y):
+            return np.float128(1) - np.float128(y) * np.float128(y)
 
         # inbuilt method to print the layer
         # print(layer) will give these results
@@ -851,7 +1043,12 @@ class matrix:
         if wait:
             self.data = []
         else:
-            self.data = np.random.uniform(-1, 1, (self.rows, self.cols))
+            np.random.uniform2 = lambda *args, dtype=np.float64: np.random.uniform(
+                *args
+            ).astype(dtype)
+            self.data = np.random.uniform2(
+                -0.5, 0.5, (self.rows, self.cols), dtype=np.float128
+            )
 
     def __str__(self):
         print("\n")
@@ -875,7 +1072,7 @@ class matrix:
             ), "Invalid Matrix Provided"
             self.data = np.multiply(self.data, n.data)
         elif isinstance(n, numbers.Number):
-            self.data = self.data * n
+            self.data = self.data * np.float128(n)
 
     @staticmethod
     def multiply(m1, m2):
@@ -891,6 +1088,9 @@ class matrix:
 
     def toList(self):
         return self.data.flatten().tolist()
+
+    def justFlatten(self):
+        return self.data.flatten()
 
     def map(self, fn):
         self.data = fn(self.data)
@@ -930,7 +1130,7 @@ class matrix:
             assert n.rows == self.rows and n.cols == self.cols, "Invalid Parameters"
             self.data = self.data + n.data
         else:
-            self.data = self.data + n
+            self.data = self.data + np.float128(n)
 
     @staticmethod
     def transpose(m):
