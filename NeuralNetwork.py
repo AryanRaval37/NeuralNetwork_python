@@ -1,6 +1,15 @@
+
+# >      ███╗   ██╗███████╗██╗   ██╗██████╗  █████╗ ██╗         ███╗   ██╗███████╗████████╗██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗
+# >     ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔══██╗██║         ████╗  ██║██╔════╝╚══██╔══╝██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝
+# >    ██╔██╗ ██║█████╗  ██║   ██║██████╔╝███████║██║         ██╔██╗ ██║█████╗     ██║   ██║ █╗ ██║██║   ██║██████╔╝█████╔╝ 
+# >   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██╔══██║██║         ██║╚██╗██║██╔══╝     ██║   ██║███╗██║██║   ██║██╔══██╗██╔═██╗ 
+# >  ██║ ╚████║███████╗╚██████╔╝██║  ██║██║  ██║███████╗    ██║ ╚████║███████╗   ██║   ╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗
+# > ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝    ╚═╝  ╚═══╝╚══════╝   ╚═╝    ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+                                                                                                                     
 import numbers
 import random
 import concurrent.futures
+import multiprocessing as mp
 from multiprocessing import Queue, Process
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -11,9 +20,17 @@ import copy
 from scipy.special import expit
 from tqdm import tqdm
 
+# Working version: Somehow plotting got broken in the last version
+# python 3.13
+
 # ! ALERT : Activation function: LeakyReLU and tanh are not in yet in an evolved state
 # ! They may result to overflow error and stop of the gradient descent algorithm.
 
+# todo: It is stupid to have all numerical operations happen in float128
+# it makes no difference to performance and should be switched to float32 try
+# float16 if it makes tangible difference to speed
+
+# todo: Uncessary and stupid way to do it, maybe consider changing it
 sigmoid = "-=-=-=-=-"
 tanh = "-=-=-=-=-=-"
 ReLU = "-=-=-=-=-=-=-"
@@ -189,14 +206,14 @@ class NeuralNetwork:
         q.put(correct)
 
     # method to run tests using testing data
-    def runTest(self, applySoftmax=True):
+    def runTest(self, applySoftmax=True, parallel=5):
         assert (
             self.task == "Classification"
         ), "\nTests can be run only for the task Classification.\n"
         if len(self.testingData) == 0:
             return
         processes = []
-        testing = np.array_split(self.testingData, 5)
+        testing = np.array_split(self.testingData, parallel)
         testing = [list(x) for x in testing]
         q = Queue()
         for i in range(5):
@@ -480,11 +497,14 @@ class NeuralNetwork:
 
     @staticmethod
     def myLossPlotter(queue, endQueue, plottingType):
+        # Setting up plot
         anim = None
         xdata = []
         ydata = []
+        plt.style.use('fast')
         fig, ax = plt.subplots()
-        (In,) = plt.plot([], [])
+        line, = plt.plot([], [], lw=2, color="green")
+        ax.grid()
 
         def init():
             ax.set_title("Training Process")
@@ -493,46 +513,79 @@ class NeuralNetwork:
             else:
                 ax.set_xlabel("Epochs")
             ax.set_ylabel("Loss / Cost")
-            return (In,)
+            line.set_data(xdata, ydata)
+            return (line,)
 
-        def animate(i):
-            while not queue.empty():
-                queueData = queue.get_nowait()
-                xdata.append(queueData[1])
-                ydata.append(queueData[0])
-            ax.cla()
+        # Function to get data from the queue
+        def getData():
+            while True:
+                incomingData = []
+                while not queue.empty():
+                    queueData = queue.get_nowait()
+                    incomingData.append((queueData[1], queueData[0]))
+                yield incomingData
+
+        def animate(incomingData):
             init()
-            ax.plot(xdata, ydata, linewidth=2, color="green")
+            for data in incomingData:
+                xdata.append(data[0])
+                ydata.append(data[1])
+            if len(xdata) == 0 or len(ydata) == 0:
+                return (line,)
+            
+            line.set_data(xdata, ydata)
+            ax.set_yscale('log')
+            ax.relim()
+            ax.autoscale_view()
+
+            # Remove previous annotations and extra lines if they exist
+            if hasattr(animate, 'min_point'):
+                animate.min_point.remove()
+            if hasattr(animate, 'min_text'):
+                animate.min_text.remove()
+            if hasattr(animate, 'ma_line'):
+                animate.ma_line.remove()
+
+            # Highlight the best (minimum loss) point
+            if ydata:
+                min_idx = ydata.index(min(ydata))
+                animate.min_point = ax.scatter([xdata[min_idx]], [ydata[min_idx]], color='red', zorder=5, label='Best')
+                # Show min and current loss as text
+                animate.min_text = ax.text(
+                    0.98, 0.98,
+                    f"Min: {min(ydata):.4g}\nNow: {ydata[-1]:.4g}",
+                    transform=ax.transAxes,
+                    fontsize=10,
+                    verticalalignment='top',
+                    horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7)
+                )
+                # Plot moving average
+                window = 50
+                if len(ydata) >= window:
+                    ma = np.convolve(ydata, np.ones(window)/window, mode='valid')
+                    animate.ma_line, = ax.plot(xdata[window-1:], ma, color='blue', linestyle='--', label='Moving Avg')
+                else:
+                    animate.ma_line, = ax.plot([], [], color='blue', linestyle='--', label='Moving Avg')
+
             if not endQueue.empty():
                 shouldplot = endQueue.get()
                 if not shouldplot:
                     anim.event_source.stop()
-            return (In,)
+            return (line,)
 
-        anim = FuncAnimation(fig, animate, init_func=init, blit=True, interval=2)
-        plt.style.use("fivethirtyeight")
-        fig.set_size_inches(10, 7)
-        plt.show()
+        anim = FuncAnimation(fig, animate, getData, init_func=init, interval=20, save_count=1000)
+        plt.show(block=True)
 
     @staticmethod
     def trainNotToBeUsed(
-        nn, queue, epochs, plot_interval, lossQueue, debug, everyEpoch
+        nn, queue, epochs, plot_interval, lossQueue, debug, everyEpoch, plotQueue, endQueue
     ):
+        if plt.get_backend() == "MacOSX":
+            mp.set_start_method("forkserver", force=True)
+
         epochLosses = []
         k = 1
-        if debug:
-            queue1 = Queue()
-            endQueue = Queue()
-            if plot_interval < 1:
-                plotingProcess = Process(
-                    target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue, "Data"]
-                )
-            else:
-                plotingProcess = Process(
-                    target=NeuralNetwork.myLossPlotter, args=[queue1, endQueue, "N"]
-                )
-            plotingProcess.daemon = True
-            plotingProcess.start()
 
         if not everyEpoch:
             myRange1 = tqdm(range(epochs))
@@ -540,20 +593,22 @@ class NeuralNetwork:
         else:
             myRange1 = range(epochs)
             myRange2 = tqdm(range(len(nn.data)))
+
         for epochCounter in myRange1:
             random.shuffle(nn.data)
-            # training an epoch
+            # trainin an epoch
             epochLosses = []
             z = 1
             for d in myRange2:
                 input_array = nn.data[d]["input"]
                 target_array = nn.data[d]["target"]
-                # adding the inputs to the input layer.
+
+                # adding the inputs to the input layer
                 nn.layers[0].inputList = input_array
-                # converting it to a matrix
+                # converting the input list to a matrix
                 nn.layers[0].inputMatrix = matrix.toMatrix(input_array, "InputList")
 
-                # producing outputs for the inputs with the first layer.
+                # predicting the outputs of the first layer
                 previousPrediction = nn.predictLayer(1, nn.layers[0].inputMatrix)
 
                 # innitially i has to be two as the outputs of the first layer with the 0 layer
@@ -568,70 +623,49 @@ class NeuralNetwork:
                     i += 1
                 outputs = previousPrediction
 
-                # converting target list to matrix.
                 targets = matrix.toMatrix(target_array)
-
                 # ERROR = DESIRED - GUESS
                 # Therefore first calculating guess and subtracting from target
                 output_errors = matrix.subtract(targets, outputs)
-
                 costMatrix = matrix.map_static(output_errors, nn.mapLoss)
                 loss = costMatrix.mean()
                 epochLosses.append(np.float32(loss))
                 if plot_interval == 0 and debug:
-                    queue1.put([loss, epochCounter * len(nn.data) + d + 1])
-
+                    plotQueue.put([loss, epochCounter * len(nn.data) + d + 1])
                 Errors = output_errors
                 i = len(nn.layers) - 1
                 while i >= 1:
                     layer2 = nn.layers[i]
-
-                    # calculaing gradients between layer i and i-1
-                    # gradients = matrix.map_static(layerPredictions[i], nn.dsigmoid)
                     gradients = matrix.map_static(
                         layerPredictions[i], layer2.dactivation
                     )
                     gradients.simpleMultiply(Errors)
                     gradients.map(nn.mapLR)
-
-                    # calculating change in weights
                     l1_predictions_transposed = matrix.transpose(
                         layerPredictions[i - 1]
                     )
                     weights_l2l1_deltas = matrix.multiply(
                         gradients, l1_predictions_transposed
                     )
-
-                    # changing the weights of layer i
                     layer2.weights.add(weights_l2l1_deltas)
                     layer2.bias.add(gradients)
-
-                    # calculating the errors for the next layer for next iteration in loop
                     weights_l2l1_transposed = matrix.transpose(layer2.weights)
                     Errors = matrix.multiply(weights_l2l1_transposed, Errors)
-
-                    # reassigning layer2 to the actualy layers
                     nn.layers[i] = layer2
                     i -= 1
-                # End of Backpropogation
                 if debug and plot_interval > 0 and plot_interval < 1:
                     if d + 1 >= int(plot_interval * len(nn.data)) * z:
-                        # should plot
-                        queue1.put([loss, epochCounter * len(nn.data) + d + 1])
+                        plotQueue.put([loss, epochCounter * len(nn.data) + d + 1])
                         z += 1
-            # End of going through all data (End of an EPOCH)
             sum = 0
             for i in range(len(epochLosses)):
                 sum += epochLosses[i]
             meanLoss = sum / len(epochLosses)
             if debug and plot_interval >= 1:
                 if epochCounter + 1 >= plot_interval * k:
-                    # checking if it is time to plot
-                    queue1.put([meanLoss, epochCounter + 1])
+                    plotQueue.put([meanLoss, epochCounter + 1])
                     k += 1
-            # passing this to whileDoing function from main function call
             lossQueue.put([epochCounter + 1, meanLoss])
-        # End of going through all the epochs (Training complete)
         changedWeights = [0]
         for i in range(1, len(nn.layers)):
             changedWeights.append(nn.layers[i])
@@ -639,16 +673,24 @@ class NeuralNetwork:
         lossQueue.put(False)
         if debug:
             endQueue.put(False)
-            plotingProcess.join()
+                     
+
+#*    ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ 
+#*   ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝ 
+#*     ██║   ██████╔╝███████║██║██╔██╗ ██║██║██╔██╗ ██║██║  ███╗
+#*    ██║   ██╔══██╗██╔══██║██║██║╚██╗██║██║██║╚██╗██║██║   ██║
+#*   ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
+#*  ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
 
     def train(
         self,
-        whileTraining,
         epochs,
         plotInterval=5,
+        whileTraining=None,
         debug=True,
         everyEpoch=False,
     ):
+
         assert (
             self.compiled
         ), "\n\nThe model is not compiled yet.\n Compile the model to train..\n"
@@ -658,15 +700,44 @@ class NeuralNetwork:
         ), "\n\nThe plot interval is less than the number of epochs.\n"
 
         self.isTraining = True
-        queue = Queue()
-        lossQueue = Queue()
+
+        manager = mp.Manager()
+        # Used to send the updated network layers (weights/biases) from the training process 
+        # back to the main process after training is complete.
+        queue = manager.Queue()
+        # Used to send loss and epoch information from the training process to the main 
+        # process, so the main process can call the whileTraining callback with the latest loss/epoch.
+        lossQueue = manager.Queue()
+        # Used to send loss data from the training process to the plotting process 
+        # for real-time visualization.
+        plotQueue = manager.Queue()
+        # Used to signal the plotting process to stop when training is finished
+        endQueue = manager.Queue()
+
+        # Start plotting process if debug
+        if debug:
+            plotProcess = Process(
+                target=NeuralNetwork.myLossPlotter,
+                args=[plotQueue, endQueue, "N" if plotInterval >= 1 else "Data"]
+            )
+            # If true, the the ploting process will end if the main process ends.
+            plotProcess.daemon = False
+            plotProcess.start()
+        else:
+            plotProcess = None
+
+        # Start training process
         trainingProcess = Process(
             target=self.__class__.trainNotToBeUsed,
-            args=[self, queue, epochs, plotInterval, lossQueue, debug, everyEpoch],
+            args=[self, queue, epochs, plotInterval, lossQueue, debug, everyEpoch, plotQueue, endQueue],
         )
-        trainingProcess.daemon = False
+        # True so that the training stops if the main process ends.
+        trainingProcess.daemon = True
         trainingProcess.start()
+
         while trainingProcess.is_alive():
+            if whileTraining is None:
+                continue
             if everyEpoch:
                 EpochInfo = lossQueue.get()
                 if not EpochInfo:
@@ -679,6 +750,9 @@ class NeuralNetwork:
             self.layers[i] = updatedLayers[i]
         self.isTraining = False
 
+        # Wait for plot process to finish
+        if debug and plotProcess is not None:
+            plotProcess.join()
     # Cost / Loss function :
     #   C = 1/2 * (Guess - Desired)^2
 
