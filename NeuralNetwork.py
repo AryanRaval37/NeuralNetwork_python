@@ -26,20 +26,31 @@ from tqdm import tqdm
 # ! ALERT : Activation function: LeakyReLU and tanh are not in yet in an evolved state
 # ! They may result to overflow error and stop of the gradient descent algorithm.
 
-# todo: It is stupid to have all numerical operations happen in float128
-# it makes no difference to performance and should be switched to float32 try
-# float16 if it makes tangible difference to speed
-
 # todo: Uncessary and stupid way to do it, maybe consider changing it
 sigmoid = "-=-=-=-=-"
 tanh = "-=-=-=-=-=-"
 ReLU = "-=-=-=-=-=-=-"
 LeakyReLU = "-=-=-=-=-=-=-=-"
 
+# Store the original formatwarning function
+original_formatwarning = warnings.formatwarning
+
+# Define a custom formatwarning function
+def custom_formatwarning(message, category, filename, lineno, line=None):
+    # This version excludes the 'line' argument, which contains the source code line
+    return original_formatwarning(message, category, filename, lineno, line='\n\b\b\b\b┓ ┏      •    \n┃┃┃┏┓┏┓┏┓┓┏┓┏┓\n┗┻┛┗┻┛ ┛┗┗┛┗┗┫\n             ┛\n')
+# Override the default formatwarning with your custom one
+warnings.formatwarning = custom_formatwarning
+warnings.simplefilter("default")
 
 class NeuralNetwork:
-    def __init__(self, inputs, outputs=None, labels=None, task="Regression"):
 
+    # Initilize the NeuralNetwrk object by providing input nodes,
+    # output nodes if task if Regression or 
+    # labels if task is Classification.
+    def __init__(self, inputs, outputs=None, labels=None, task="Regression", supress_neuralnetwork_warnings=False):
+        global supressWarnings
+        supressWarnings = supress_neuralnetwork_warnings
         self.inputNodes = inputs
         assert task in [
             "Regression",
@@ -114,9 +125,29 @@ class NeuralNetwork:
         self.learning_rate = 0.1
         # boolean to check if the model is training
         self.isTraining = False
-        warnings.simplefilter("default")
 
-    # function to add training data to the network
+    # ------------------------------------------------------------------------
+    # Adds a training data point to the network.
+    #
+    # For Regression:
+    #   - input_array: list of numbers, length must equal self.inputNodes
+    #   - output: list of numbers, length must equal self.outputNodes
+    #
+    # For Classification:
+    #   - input_array: list of numbers, length must equal self.inputNodes
+    #   - output: string, the class label
+    #     - If the label is new and the number of labels is less than self.outputNodes,
+    #       it will be added to self.labels.
+    #     - The label is internally converted to a one-hot encoded target array.
+    #
+    # Example (Regression):
+    #   nn.addTrainingData([0.5, 1.2], [0.8])
+    #
+    # Example (Classification):
+    #   nn.addTrainingData([0.1, 0.9], "cat")
+    #
+    # Raises AssertionError if input/output format is invalid or label limit is exceeded.
+    # ------------------------------------------------------------------------
     def addTrainingData(self, input_array, output):
         if self.task == "Regression":
             assert isinstance(
@@ -151,46 +182,160 @@ class NeuralNetwork:
             target_array[self.labels.index(output)] = 1
             self.data.append({"input": input_array, "target": target_array})
 
-    # function to add testing data to the network
-    def addTestingData(self, input_array, label):
-        assert (
-            self.task == "Classification"
-        ), "\nTesting data can only be added for the task Classification.\n"
-        assert isinstance(
-            label, str
-        ), f"The output given to addTestingData for Classification is a {type(label)}.\nExpected a string."
-        assert isinstance(
-            input_array, list
-        ), f"\n\nThe inputs provided to the addTestingData function are of type {type(input_array)}.\nExpected list."
-        assert self.inputNodes == len(
-            input_array
-        ), f"\n\nThe inputs provided to the addTestingData function do not match number of inputs mentioned earlier.\nThe lenght is {len(input_array)}, expected : {self.inputNodes}"
-        assert (
-            label in self.labels
-        ), f"\n\nThe label is not in the list of labels given to add the data.\nThe list is {self.labels}\nGot label {label}"
-        self.testingData.append({"input": input_array, "label": label})
 
+    # ! Not tested for regression, may not work
+    # ------------------------------------------------------------------------
+    # Adds a testing data point to the network.
+    #
+    # For Regression:
+    #   - input_array: list of numbers, length must equal self.inputNodes
+    #   - output: list of numbers, length must equal self.outputNodes
+    #
+    # For Classification:
+    #   - input_array: list of numbers, length must equal self.inputNodes
+    #   - label: string, the class label (must already exist in self.labels)
+    #
+    # Example (Regression):
+    #   nn.addTestingData([0.5, 0.6], [0.8])
+    #
+    # Example (Classification):
+    #   nn.addTestingData([0.5, 0.6], "cat")
+    #
+    # Raises AssertionError if input/output format is invalid or label is not in self.labels (for classification).
+    # ------------------------------------------------------------------------
+    def addTestingData(self, input_array, output):
+        if self.task == "Regression":
+            assert isinstance(
+                output, list
+            ), f"\n\nThe output given to addTestingData for Regression is a {type(output)}.\nExpected a list."
+            assert isinstance(
+                input_array, list
+            ), f"\n\nThe inputs provided to addTestingData are of type {type(input_array)}.\nExpected list."
+            assert self.inputNodes == len(
+                input_array
+            ), "\n\nThe inputs provided to addTestingData do not match number of inputs mentioned earlier."
+            assert self.outputNodes == len(
+                output
+            ), "\n\nThe targets provided to addTestingData do not match number of outputs mentioned earlier."
+            self.testingData.append({"input": input_array, "target": output})
+        elif self.task == "Classification":
+            assert isinstance(
+                output, str
+            ), f"\n\nThe output given to addTestingData for Classification is a {type(output)}.\nExpected a string."
+            assert isinstance(
+                input_array, list
+            ), f"\n\nThe inputs provided to addTestingData are of type {type(input_array)}.\nExpected list."
+            assert self.inputNodes == len(
+                input_array
+            ), f"\n\nThe inputs provided to addTestingData do not match number of inputs mentioned earlier.\nThe length is {len(input_array)}, expected : {self.inputNodes}"
+            assert (
+                output in self.labels
+        ), f"\n\nThe label is not in the list of labels given to add the data.\nThe list is {self.labels}\nGot label {output}"
+        self.testingData.append({"input": input_array, "label": output})
+
+    # ------------------------------------------------------------------------
+    # Adds a batch of data points to the network and splits them into training and testing sets.
+    # (Classification tasks only)
+    #
+    # Parameters:
+    #   - data: list of dicts, each with keys "input" (list of numbers) and "label" (string)
+    #   - threshold: float between 0 and 1, fraction of data to use for training (rest for testing)
+    #
+    # Example:
+    #   data = [
+    #       {"input": [0.1, 0.2], "label": "cat"},
+    #       {"input": [0.3, 0.4], "label": "dog"},
+    #   ]
+    #   nn.addData(data, threshold=0.8)  # 80% for training, 20% for testing
+    #
+    # Raises AssertionError if:
+    #   - Task is not Classification
+    #   - Any element of data is not a dict with "input" and "label"
+    #   - "input" is not a list or "label" is not a string
+    #   - Input length or label validity checks fail in addTrainingData/addTestingData
+    # ------------------------------------------------------------------------
+    # def addData(self, data, threshold):
+    #     assert (
+    #         self.task == "Classification"
+    #     ), "\nTesting data can be added only for task Classification. To add Training data, use the addTrainingData method"
+    #     for d in data:
+    #         assert isinstance(
+    #             d, dict
+    #         ), "\nThe element of data array must be a dict containing input and label."
+    #         assert (
+    #             "input" in d.keys()
+    #         ), "\nThe inputs are not given in the dict of the data array."
+    #         assert (
+    #             "label" in d.keys()
+    #         ), "\nThe label is not given in the dict of the data array."
+    #     myData = np.split(data, [int(threshold * len(data)), len(data)])
+    #     trainingData = myData[0]
+    #     testingData = myData[1]
+    #     for d in trainingData:
+    #         self.addTrainingData(d["input"], d["label"])
+    #     for d in testingData:
+    #         self.addTestingData(d["input"], d["label"])
+
+
+    # ! Not tested for regression, may not work
+    # ------------------------------------------------------------------------
+    # Adds a batch of data points to the network and splits them into training and testing sets.
+    #
+    # For Regression:
+    #   - data: list of dicts, each with keys "input" (list of numbers) and "target" (list of numbers)
+    #   - threshold: float between 0 and 1, fraction of data to use for training (rest for testing)
+    #
+    # For Classification:
+    #   - data: list of dicts, each with keys "input" (list of numbers) and "label" (string)
+    #   - threshold: float between 0 and 1, fraction of data to use for training (rest for testing)
+    #
+    # Example (Regression):
+    #   data = [
+    #       {"input": [0.1, 0.2], "target": [0.5]},
+    #       {"input": [0.3, 0.4], "target": [0.7]},
+    #   ]
+    #   nn.addData(data, threshold=0.8)
+    #
+    # Example (Classification):
+    #   data = [
+    #       {"input": [0.1, 0.2], "label": "cat"},
+    #       {"input": [0.3, 0.4], "label": "dog"},
+    #   ]
+    #   nn.addData(data, threshold=0.8)
+    #
+    # Raises AssertionError if input/output format is invalid or label is not in self.labels (for classification).
+    # ------------------------------------------------------------------------
     def addData(self, data, threshold):
-        assert (
-            self.task == "Classification"
-        ), "\nTesting data can be added only for task Classification. To add Training data, use the addTrainingData method"
+        assert isinstance(data, list), "\nThe data provided must be a list."
+        assert 0 < threshold < 1, "\nThreshold must be between 0 and 1."
         for d in data:
             assert isinstance(
                 d, dict
-            ), "\nThe element of data array must be a dict containing input and label."
+            ), "\nEach element of data must be a dict."
             assert (
                 "input" in d.keys()
             ), "\nThe inputs are not given in the dict of the data array."
-            assert (
-                "label" in d.keys()
-            ), "\nThe label is not given in the dict of the data array."
-        myData = np.split(data, [int(threshold * len(data)), len(data)])
-        trainingData = myData[0]
-        testingData = myData[1]
-        for d in trainingData:
-            self.addTrainingData(d["input"], d["label"])
-        for d in testingData:
-            self.addTestingData(d["input"], d["label"])
+            if self.task == "Regression":
+                assert (
+                    "target" in d.keys()
+                ), "\nThe target is not given in the dict of the data array for Regression."
+            elif self.task == "Classification":
+                assert (
+                    "label" in d.keys()
+                ), "\nThe label is not given in the dict of the data array for Classification."
+        split_idx = int(threshold * len(data))
+        trainingData = data[:split_idx]
+        testingData = data[split_idx:]
+        if self.task == "Regression":
+            for d in trainingData:
+                self.addTrainingData(d["input"], d["target"])
+            for d in testingData:
+                self.addTestingData(d["input"], d["target"])
+        elif self.task == "Classification":
+            for d in trainingData:
+                self.addTrainingData(d["input"], d["label"])
+            for d in testingData:
+                self.addTestingData(d["input"], d["label"])
 
     @staticmethod
     def myRunTest(nn, testing, applySoftmax, q):
@@ -350,9 +495,10 @@ class NeuralNetwork:
                         mydataJSON = json.dumps(mylayers, ensure_ascii=False, indent=2)
                         file.write(mydataJSON)
                         file.close()
-                    warnings.warn(
-                        f"\n\nA file with the given file name already exists.\nThe name of the file saved right now is now {myFileName}"
-                    )
+                    if not supressWarnings:
+                        warnings.warn(
+                            f"\n\nA file with the given file name already exists.\nThe name of the file saved right now is now {myFileName}"
+                        )
                     return
                 except TypeError:
                     assert (
@@ -412,7 +558,7 @@ class NeuralNetwork:
                         wait=True,
                     )
                     myLayer.weights.data = np.array(
-                        l["weights"]["data"], dtype=np.float128
+                        l["weights"]["data"], dtype=np.float32
                     )
                     myLayer.bias = matrix(
                         rows=l["bias"]["rows"],
@@ -420,7 +566,7 @@ class NeuralNetwork:
                         name=l["bias"]["name"],
                         wait=True,
                     )
-                    myLayer.bias.data = np.array(l["bias"]["data"], dtype=np.float128)
+                    myLayer.bias.data = np.array(l["bias"]["data"], dtype=np.float32)
                 self.layers[myLayer.key] = myLayer
             else:
                 if self.task == "Classification":
@@ -462,9 +608,10 @@ class NeuralNetwork:
                     activation=data[i + 1]["activation"],
                 )
             except:
-                warnings.warn(
-                    "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
-                )
+                if not supressWarnings:
+                    warnings.warn(
+                        "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
+                    )
                 layer = NeuralNetwork.layer(
                     name=data[0]["Config_Info"]["layer_names"][i],
                     nodes=data[0]["Config_Info"]["layer_nodes"][i],
@@ -474,15 +621,16 @@ class NeuralNetwork:
         try:
             nn.compileModel(activation=data[len(data) - 1]["activation"])
         except:
-            warnings.warn(
-                "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
-            )
+            if not supressWarnings:
+                warnings.warn(
+                    "\nThe activation function for the layers is not provided.\nAssuming it is an older file, The activation is being considered to be sigmoid."
+                )
             nn.compileModel(activation=sigmoid)
         nn.load(filename)
         return nn
 
     def mapLR(self, x):
-        return np.float128(np.float128(x) * np.float128(self.learning_rate))
+        return np.float32(np.float32(x) * np.float32(self.learning_rate))
 
     # function to change the learning rate of the network.
     def setLearningRate(self, lr):
@@ -490,10 +638,10 @@ class NeuralNetwork:
             lr, numbers.Number
         ), "\nThe learning rate given is not a number."
         assert lr > 0 and lr <= 2.5, "\nInvalid learning rate given."
-        self.learning_rate = np.float128(lr)
+        self.learning_rate = np.float32(lr)
 
     def mapLoss(self, x):
-        return np.float128(x) * np.float128(x) / np.float128(2)
+        return np.float32(x) * np.float32(x) / np.float32(2)
 
     @staticmethod
     def myLossPlotter(queue, endQueue, plottingType):
@@ -579,7 +727,7 @@ class NeuralNetwork:
 
     @staticmethod
     def trainNotToBeUsed(
-        nn, queue, epochs, plot_interval, lossQueue, debug, everyEpoch, plotQueue, endQueue
+        nn, queue, epochs, plot_interval, lossQueue, debug, everyEpoch, plotQueue, endQueue, stopQueue
     ):
         if plt.get_backend() == "MacOSX":
             mp.set_start_method("forkserver", force=True)
@@ -634,6 +782,7 @@ class NeuralNetwork:
                     plotQueue.put([loss, epochCounter * len(nn.data) + d + 1])
                 Errors = output_errors
                 i = len(nn.layers) - 1
+                # gradient descent
                 while i >= 1:
                     layer2 = nn.layers[i]
                     gradients = matrix.map_static(
@@ -653,14 +802,24 @@ class NeuralNetwork:
                     Errors = matrix.multiply(weights_l2l1_transposed, Errors)
                     nn.layers[i] = layer2
                     i -= 1
+                # End of gradient descent
+                # Check for stop signal
+                if not stopQueue.empty():
+                    # Send latest weights and exit
+                    changedWeights = [0]
+                    for i in range(1, len(nn.layers)):
+                        changedWeights.append(nn.layers[i])
+                    queue.put(changedWeights)
+                    lossQueue.put(False)
+                    if debug:
+                        endQueue.put(False)
+                    return
                 if debug and plot_interval > 0 and plot_interval < 1:
                     if d + 1 >= int(plot_interval * len(nn.data)) * z:
                         plotQueue.put([loss, epochCounter * len(nn.data) + d + 1])
                         z += 1
-            sum = 0
-            for i in range(len(epochLosses)):
-                sum += epochLosses[i]
-            meanLoss = sum / len(epochLosses)
+                        
+            meanLoss = sum(epochLosses) / len(epochLosses)
             if debug and plot_interval >= 1:
                 if epochCounter + 1 >= plot_interval * k:
                     plotQueue.put([meanLoss, epochCounter + 1])
@@ -713,6 +872,9 @@ class NeuralNetwork:
         plotQueue = manager.Queue()
         # Used to signal the plotting process to stop when training is finished
         endQueue = manager.Queue()
+        # used to end stop training if plotting is quit
+        stopQueue = manager.Queue()
+
 
         # Start plotting process if debug
         if debug:
@@ -729,13 +891,22 @@ class NeuralNetwork:
         # Start training process
         trainingProcess = Process(
             target=self.__class__.trainNotToBeUsed,
-            args=[self, queue, epochs, plotInterval, lossQueue, debug, everyEpoch, plotQueue, endQueue],
+            args=[self, queue, epochs, plotInterval, lossQueue, debug, everyEpoch, plotQueue, endQueue, stopQueue],
         )
         # True so that the training stops if the main process ends.
         trainingProcess.daemon = True
         trainingProcess.start()
 
         while trainingProcess.is_alive():
+            # Check if plotting process has ended before training is done.
+            if debug and plotProcess is not None and not plotProcess.is_alive():
+                # signal training process to stop and send latest weights
+                stopQueue.put(True)
+                trainingProcess.join()
+                if not supressWarnings:
+                    print(supressWarnings)
+                    warnings.warn("\n\n\"The Plotting process was ended before trainig was complete. Now exiting out of train function.\"")
+                break
             if whileTraining is None:
                 continue
             if everyEpoch:
@@ -896,9 +1067,10 @@ class NeuralNetwork:
         ), "\n\nThe model is already compiled.\n It cannot be recompiled."
 
         if activation is None:
-            warnings.warn(
-                f"\n\nThe activation function was not given for the output layer.\nUsing Sigmoid activation."
-            )
+            if not supressWarnings:
+                warnings.warn(
+                    f"\n\nThe activation function was not given for the output layer.\nUsing Sigmoid activation."
+                )
             activation = sigmoid
         self.layers.append(
             self.layer(
@@ -933,9 +1105,10 @@ class NeuralNetwork:
             self.name = name
 
             if activation is None:
-                warnings.warn(
-                    f"The activation function for the layer {self.name} is not given.\nUsing sigmoid activation instead."
-                )
+                if not supressWarnings:
+                    warnings.warn(
+                        f"The activation function for the layer {self.name} is not given.\nUsing sigmoid activation instead."
+                 )
                 activation = sigmoid
 
             if activation in [sigmoid, ReLU, LeakyReLU, tanh]:
@@ -972,42 +1145,42 @@ class NeuralNetwork:
         # These functions cannot be private as they cannot be called by the matrix library.
         # the Activation functions of the network
         def Sigmoid(self, x):
-            # # return np.float128(1) / (np.float128(1) + np.exp(np.float128(-x)))
-            # x1 = (x >= 0) * np.float128(
-            #     1 / (1 + np.exp(np.float128(-x), dtype=np.float128))
+            # # return np.float32(1) / (np.float32(1) + np.exp(np.float32(-x)))
+            # x1 = (x >= 0) * np.float32(
+            #     1 / (1 + np.exp(np.float32(-x), dtype=np.float32))
             # )
-            # expX = np.exp(x, dtype=np.float128)
-            # x2 = (x < 0) * np.float128(expX / (1 + expX))
+            # expX = np.exp(x, dtype=np.float32)
+            # x2 = (x < 0) * np.float32(expX / (1 + expX))
             # return x1 + x2
-            return expit(x, dtype=np.float128)
+            return expit(x, dtype=np.float32)
 
         def dSigmoid(self, y):
-            return np.float128(y) * (np.float128(1) - np.float128(y))
+            return np.float32(y) * (np.float32(1) - np.float32(y))
 
         def reLU(self, x):
-            return np.float128(x) * np.float128(x > 0)
+            return np.float32(x) * np.float32(x > 0)
 
         def dreLU(self, x):
-            return np.float128(1.0) * np.float128(x > 0)
+            return np.float32(1.0) * np.float32(x > 0)
 
         def leakyReLU(self, x):
-            y1 = np.float128(x > 0) * np.float128(x)
-            y2 = np.float128(x <= 0) * np.float128(x) * np.float128(0.01)
-            return np.float128(y1) + np.float128(y2)
+            y1 = np.float32(x > 0) * np.float32(x)
+            y2 = np.float32(x <= 0) * np.float32(x) * np.float32(0.01)
+            return np.float32(y1) + np.float32(y2)
 
         def dleakyReLU(self, y):
-            y1 = np.float128(y >= 0)
-            y2 = np.float128(y < 0) * np.float128(0.01)
-            return np.float128(y1) + np.float128(y2)
+            y1 = np.float32(y >= 0)
+            y2 = np.float32(y < 0) * np.float32(0.01)
+            return np.float32(y1) + np.float32(y2)
 
         def Tanh(self, z):
-            # return (np.exp(np.float128(z)) - np.exp(np.float128(-z))) / (
-            #     np.exp(np.float128(z)) + np.exp(np.float128(-z))
+            # return (np.exp(np.float32(z)) - np.exp(np.float32(-z))) / (
+            #     np.exp(np.float32(z)) + np.exp(np.float32(-z))
             # )
-            return np.tanh(z, dtype=np.float128)
+            return np.tanh(z, dtype=np.float32)
 
         def dTanh(self, y):
-            return np.float128(1) - np.float128(y) * np.float128(y)
+            return np.float32(1) - np.float32(y) * np.float32(y)
 
         # inbuilt method to print the layer
         # print(layer) will give these results
@@ -1047,7 +1220,7 @@ class matrix:
                 *args
             ).astype(dtype)
             self.data = np.random.uniform2(
-                -0.5, 0.5, (self.rows, self.cols), dtype=np.float128
+                -0.5, 0.5, (self.rows, self.cols), dtype=np.float32
             )
 
     def __str__(self):
@@ -1072,7 +1245,7 @@ class matrix:
             ), "Invalid Matrix Provided"
             self.data = np.multiply(self.data, n.data)
         elif isinstance(n, numbers.Number):
-            self.data = self.data * np.float128(n)
+            self.data = self.data * np.float32(n)
 
     @staticmethod
     def multiply(m1, m2):
@@ -1130,7 +1303,7 @@ class matrix:
             assert n.rows == self.rows and n.cols == self.cols, "Invalid Parameters"
             self.data = self.data + n.data
         else:
-            self.data = self.data + np.float128(n)
+            self.data = self.data + np.float32(n)
 
     @staticmethod
     def transpose(m):
