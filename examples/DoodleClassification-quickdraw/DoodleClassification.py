@@ -115,9 +115,9 @@ if __name__ == "__main__":
     nn = NeuralNetwork(inputs=784, labels=4, task="Classification")
 
     # Adding layers to the network.
-    nn.addLayer(NeuralNetwork.layer(name="Hidden1", units=1024, activation=sigmoid))
-    nn.addLayer(NeuralNetwork.layer(name="Hidden2", units=512, activation=tanh))
-    nn.addLayer(NeuralNetwork.layer(name="Hidden3", units=256, activation=tanh))
+    nn.addLayer(NeuralNetwork.layer(name="Hidden1", units=512, activation=tanh))
+    nn.addLayer(NeuralNetwork.layer(name="Hidden2", units=700, activation=tanh))
+    nn.addLayer(NeuralNetwork.layer(name="Hidden3", units=250, activation=tanh))
     nn.addLayer(NeuralNetwork.layer(name="Hidden4", units=128, activation=tanh))
     nn.addLayer(NeuralNetwork.layer(name="Hidden5", units=32, activation=tanh))
 
@@ -141,15 +141,13 @@ if __name__ == "__main__":
         print(f"Epoch : {epochs}, Loss : {loss}")
 
     # Setting the learning rate
-    nn.setLearningRate(0.08)
+    nn.setLearningRate(0.15)
     # starting training of the network.
     nn.train(
         whileTraining=whileTraining,
         epochs=300,
-        plotInterval=0.001,
         debug=True,
-        # The while training function will be called after every epoch
-        everyEpoch=True,
+        log_freq=1,
         batch_size=4000,
     )
 
