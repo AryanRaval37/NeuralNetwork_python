@@ -1,5 +1,6 @@
 # NeuralNetwork Python Library
 
+The legacy version is the older version where every single character is hand typed, the refactoring is done by AI...
 This is a simple Neural Network library built from scratch in Python.
 
 ## Refactoring to `neuralnet` Package
